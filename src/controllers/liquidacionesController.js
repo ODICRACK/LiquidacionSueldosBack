@@ -234,6 +234,10 @@ const copiarConfiguracion = async (req, res) => {
 
 // Recuerda agregar estas dos funciones a tu module.exports al final del archivo.
 
-module.exports = { crearLiquidacion, getLiquidacion, actualizarBorrador, finalizarLiquidacion, copiarConfiguracion };
-module.exports = { crearLiquidacion, getLiquidacion, actualizarBorrador };
-module.exports = { crearLiquidacion, getLiquidacion };
+module.exports = { 
+    crearLiquidacion, 
+    getLiquidacion, 
+    actualizarBorrador, 
+    finalizarLiquidacion, 
+    copiarConfiguracion 
+};
