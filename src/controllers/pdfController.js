@@ -2,6 +2,7 @@ const pool = require('../config/db');
 const puppeteer = require('puppeteer');
 const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 const pattern = require('patternomaly');
+const { calcularTotales } = require('../utils/mathEngine');
 
 // Configuración del renderizador de gráficos (ancho y alto)
 const width = 400;
@@ -59,9 +60,17 @@ const generarReciboPDF = async (req, res) => {
         const restas = items.filter(i => i.naturaleza === 'RESTA');
         const informativos = items.filter(i => i.naturaleza === 'INFORMATIVO');
 
-        const totalSuma = sumas.reduce((acc, i) => acc + parseFloat(i.resultado), 0);
-        const totalResta = restas.reduce((acc, i) => acc + parseFloat(i.resultado), 0);
-        const sueldoNeto = totalSuma - totalResta;
+        // Unidad mostrada en el recibo según el tipo de item
+        const formatearUnidad = (i) => {
+            if (i.tipo === 'PORCENTAJE') return `${i.porcentaje}% de ${i.base_token || '—'}`;
+            if (i.tipo === 'FORMULA') return i.formula;
+            return i.valor_ingresado || '';
+        };
+
+        // Totalizamos con el mismo motor que el frontend (regla consistente)
+        const resultadosMap = {};
+        items.forEach(i => { resultadosMap[i.id] = i.resultado; });
+        const totales = calcularTotales(items, resultadosMap);
 
         // 4. Construir el HTML (Estructura base referenciada en tu imagen)
         const html = `
@@ -95,13 +104,13 @@ const generarReciboPDF = async (req, res) => {
             <div class="seccion-titulo">SUELDO BRUTO / REMUNERATIVOS</div>
             <table>
                 <tr><th class="col-izq">Concepto</th><th>Unidad</th><th>Monto</th></tr>
-                ${sumas.map(i => `<tr><td class="col-izq">${i.nombre}</td><td>${i.porcentaje ? i.porcentaje + '%' : (i.valor_ingresado || '')}</td><td>$${parseFloat(i.resultado).toFixed(2)}</td></tr>`).join('')}
+                ${sumas.map(i => `<tr><td class="col-izq">${i.nombre}</td><td>${formatearUnidad(i)}</td><td>$${parseFloat(i.resultado).toFixed(2)}</td></tr>`).join('')}
             </table>
 
             <div class="seccion-titulo">DESCUENTOS</div>
             <table>
                 <tr><th class="col-izq">Concepto</th><th>Unidad</th><th>Monto</th></tr>
-                ${restas.map(i => `<tr><td class="col-izq">${i.nombre}</td><td>${i.porcentaje ? i.porcentaje + '%' : (i.valor_ingresado || '')}</td><td>$${parseFloat(i.resultado).toFixed(2)}</td></tr>`).join('')}
+                ${restas.map(i => `<tr><td class="col-izq">${i.nombre}</td><td>${formatearUnidad(i)}</td><td>$${parseFloat(i.resultado).toFixed(2)}</td></tr>`).join('')}
             </table>
 
             <div class="seccion-titulo">INFORMATIVOS</div>
@@ -112,7 +121,7 @@ const generarReciboPDF = async (req, res) => {
             <table style="margin-top: 10px; font-weight: bold; font-size: 12px;">
                 <tr>
                     <td class="col-izq">SUELDO NETO A COBRAR:</td>
-                    <td>$${sueldoNeto.toFixed(2)}</td>
+                    <td>$${totales.neto.toFixed(2)}</td>
                 </tr>
             </table>
 

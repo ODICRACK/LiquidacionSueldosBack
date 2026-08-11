@@ -6,22 +6,40 @@ const extraerTokens = (formula) => {
     return matches ? [...new Set(matches)] : [];
 };
 
-// Verifica si al agregar la 'nuevaFormula' al 'tokenDestino' se genera un ciclo
-const detectarCiclo = (tokenDestino, nuevaFormula, itemsExistentes) => {
-    const tokensNuevaFormula = extraerTokens(nuevaFormula);
-    
-    // Mapa de dependencias actual
+// Valida que la fórmula solo contenga caracteres permitidos (sin eval ni código)
+const validarFormulaChars = (formula) => {
+    if (!formula || !formula.trim()) throw new Error('La fórmula no puede estar vacía.');
+    const permitido = /^[A-Z0-9+\-*/%(). ]+$/;
+    if (!permitido.test(formula)) {
+        throw new Error('La fórmula contiene caracteres no permitidos. Use solo letras A-Z, números, espacios y + - * / % ( ).');
+    }
+};
+
+// Verifica si al configurar el 'tokenDestino' con las nuevas dependencias
+// (datos = { formula } o { base_token }) se genera un ciclo.
+// itemsExistentes: los items activos de la base (excluyen al tokenDestino con los datos viejos).
+const detectarCiclo = (tokenDestino, datos, itemsExistentes) => {
     const dependencias = {};
+
+    // Dependencias actuales de los items existentes
     itemsExistentes.forEach(item => {
         if (item.tipo === 'FORMULA' && item.formula) {
             dependencias[item.token] = extraerTokens(item.formula);
+        } else if (item.tipo === 'PORCENTAJE' && item.base_token) {
+            dependencias[item.token] = [item.base_token];
         } else {
             dependencias[item.token] = [];
         }
     });
 
-    // Actualizamos el mapa con el intento de nueva configuración
-    dependencias[tokenDestino] = tokensNuevaFormula;
+    // Dependencias nuevas del item que se está guardando
+    if (datos && datos.formula) {
+        dependencias[tokenDestino] = extraerTokens(datos.formula);
+    } else if (datos && datos.base_token) {
+        dependencias[tokenDestino] = [datos.base_token];
+    } else {
+        dependencias[tokenDestino] = [];
+    }
 
     // Función recursiva DFS para detectar ciclos
     const visitar = (tokenActual, visitados, caminoActual) => {
@@ -42,10 +60,7 @@ const detectarCiclo = (tokenDestino, nuevaFormula, itemsExistentes) => {
         return false;
     };
 
-    const visitados = new Set();
-    const caminoActual = new Set();
-
-    return visitar(tokenDestino, visitados, caminoActual);
+    return visitar(tokenDestino, new Set(), new Set());
 };
 
-module.exports = { extraerTokens, detectarCiclo };
+module.exports = { extraerTokens, detectarCiclo, validarFormulaChars };

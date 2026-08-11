@@ -1,18 +1,26 @@
 const pool = require('../config/db');
 
-// Obtiene todos los clientes y anida sus empleados activos
+// Obtiene todos los clientes y anida sus empleados activos con sus liquidaciones
 const getClientes = async (req, res) => {
     try {
         const clientesRes = await pool.query(
             'SELECT id, cuit, razon_social, domicilio_laboral FROM cliente WHERE eliminado = FALSE ORDER BY razon_social'
         );
         const empleadosRes = await pool.query(
-            'SELECT id, cuil, nombre, apellido, nro_legajo, cliente_id FROM empleado WHERE eliminado = FALSE ORDER BY apellido, nombre'
+            'SELECT id, cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id FROM empleado WHERE eliminado = FALSE ORDER BY apellido, nombre'
+        );
+        const liquidacionesRes = await pool.query(
+            'SELECT id, empleado_id, anio, mes, estado FROM liquidacion WHERE eliminado = FALSE'
         );
 
         const clientes = clientesRes.rows.map(cliente => ({
             ...cliente,
-            empleados: empleadosRes.rows.filter(e => e.cliente_id === cliente.id)
+            empleados: empleadosRes.rows
+                .filter(e => e.cliente_id === cliente.id)
+                .map(emp => ({
+                    ...emp,
+                    liquidaciones: liquidacionesRes.rows.filter(l => l.empleado_id === emp.id)
+                }))
         }));
 
         res.json(clientes);

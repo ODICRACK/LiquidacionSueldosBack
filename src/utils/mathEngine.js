@@ -77,4 +77,28 @@ const calcularFormula = (formula, contextoValores) => {
     
     return isNaN(resultadoBruto) ? 0 : redondear(resultadoBruto);
 };
-module.exports = { redondear, calcularFormula }
+
+// Calcula los totales de una liquidación según la naturaleza de sus items activos.
+// items: lista de items (con activo y naturaleza).
+// resultados: mapa { id_item: valor }.
+// Se trabaja en centavos enteros para evitar errores de punto flotante en las sumas.
+const calcularTotales = (items, resultados) => {
+    const aCentavos = (valor) => Math.round((parseFloat(valor) || 0) * 100);
+
+    const sumar = (naturaleza) => items
+        .filter(i => i.activo && i.naturaleza === naturaleza)
+        .reduce((acc, i) => acc + aCentavos(resultados[i.id]), 0);
+
+    const bruto = sumar('SUMA');
+    const descuentos = sumar('RESTA');
+    const informativos = sumar('INFORMATIVO');
+
+    return {
+        bruto: bruto / 100,
+        descuentos: descuentos / 100,
+        informativos: informativos / 100,
+        neto: (bruto - descuentos) / 100
+    };
+};
+
+module.exports = { redondear, calcularFormula, calcularTotales }

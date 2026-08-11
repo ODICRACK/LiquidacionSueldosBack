@@ -35,8 +35,8 @@ const crearLiquidacion = async (req, res) => {
         for (const item of itemsGlobales.rows) {
             await client.query(
                 `INSERT INTO liquidacion_item 
-                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
                 [
                     liquidacion_id,
                     item.id,
@@ -46,7 +46,8 @@ const crearLiquidacion = async (req, res) => {
                     item.tipo,
                     item.naturaleza,
                     item.formula,
-                    item.porcentaje
+                    item.porcentaje,
+                    item.base_token
                 ]
             );
         }

@@ -1,8 +1,8 @@
 const pool = require('../config/db');
-const { detectarCiclo, extraerTokens } = require('../utils/formulaValidator');
+const { detectarCiclo, extraerTokens, validarFormulaChars } = require('../utils/formulaValidator');
 
 const createItem = async (req, res) => {
-    const { nombre, token, tipo, naturaleza, formula, porcentaje, categorias } = req.body;
+    const { nombre, token, tipo, naturaleza, formula, porcentaje, base_token, categorias } = req.body;
     const client = await pool.connect();
 
     try {
@@ -12,14 +12,17 @@ const createItem = async (req, res) => {
         const existe = await client.query('SELECT id FROM item WHERE token = $1 AND eliminado = FALSE', [token]);
         if (existe.rows.length > 0) throw new Error(`El token ${token} ya existe.`);
 
-        // 2. Si es fórmula, validar dependencias circulares
+        // 2. Obtener items activos para validar dependencias
+        const itemsRes = await client.query('SELECT token, tipo, formula, base_token FROM item WHERE eliminado = FALSE');
+        const itemsExistentes = itemsRes.rows;
+        const tokensValidos = itemsExistentes.map(i => i.token);
+
         if (tipo === 'FORMULA') {
-            const itemsRes = await client.query('SELECT token, tipo, formula FROM item WHERE eliminado = FALSE');
-            const itemsExistentes = itemsRes.rows;
-            
+            // Validar que la fórmula solo tenga caracteres permitidos
+            validarFormulaChars(formula);
+
             // Validar que los tokens usados en la fórmula realmente existan
             const tokensUsados = extraerTokens(formula);
-            const tokensValidos = itemsExistentes.map(i => i.token);
             const tokensInexistentes = tokensUsados.filter(t => !tokensValidos.includes(t));
             
             if (tokensInexistentes.length > 0) {
@@ -27,16 +30,34 @@ const createItem = async (req, res) => {
             }
 
             // Validar ciclos
-            if (detectarCiclo(token, formula, itemsExistentes)) {
+            if (detectarCiclo(token, { formula }, itemsExistentes)) {
                 throw new Error('La fórmula genera una dependencia circular.');
+            }
+        }
+
+        if (tipo === 'PORCENTAJE') {
+            // El porcentaje requiere una base sobre la cual calcularse
+            if (!base_token) throw new Error('Un item PORCENTAJE requiere un item base (base_token).');
+
+            // La base no puede ser el propio item
+            if (base_token === token) throw new Error('La base no puede ser el propio item.');
+
+            // La base debe existir entre los items activos
+            if (!tokensValidos.includes(base_token)) {
+                throw new Error(`La base "${base_token}" no existe entre los items activos.`);
+            }
+
+            // Validar ciclos (ej: A base de B y B base de A)
+            if (detectarCiclo(token, { base_token }, itemsExistentes)) {
+                throw new Error('La base genera una dependencia circular.');
             }
         }
 
         // 3. Insertar Item
         const itemRes = await client.query(
-            `INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje) 
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-            [nombre, token, tipo, naturaleza, formula || null, porcentaje || null]
+            `INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje, base_token) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [nombre, token, tipo, naturaleza, formula || null, porcentaje || null, base_token || null]
         );
         const itemId = itemRes.rows[0].id;
 
@@ -67,10 +88,18 @@ const deleteItem = async (req, res) => {
         const itemRes = await pool.query('SELECT token FROM item WHERE id = $1', [id]);
         const tokenAEliminar = itemRes.rows[0]?.token;
 
-        // Verificar si es dependencia de alguna fórmula activa
-        const formulasRes = await pool.query('SELECT token, formula FROM item WHERE tipo = $2 AND eliminado = FALSE', [id, 'FORMULA']);
-        
-        for (const item of formulasRes.rows) {
+        // Verificar si es dependencia de alguna fórmula o base de porcentaje activa
+        const dependenciasRes = await pool.query(
+            'SELECT token, tipo, formula, base_token FROM item WHERE eliminado = FALSE AND id != $1',
+            [id]
+        );
+
+        for (const item of dependenciasRes.rows) {
+            if (item.tipo === 'PORCENTAJE' && item.base_token === tokenAEliminar) {
+                return res.status(400).json({
+                    error: `El item no puede eliminarse porque es la base del item: ${item.token}`
+                });
+            }
             const dependencias = extraerTokens(item.formula);
             if (dependencias.includes(tokenAEliminar)) {
                 return res.status(400).json({ 
