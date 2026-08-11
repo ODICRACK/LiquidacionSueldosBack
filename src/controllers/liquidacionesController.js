@@ -30,13 +30,17 @@ const crearLiquidacion = async (req, res) => {
         const liquidacion_id = liqRes.rows[0].id;
 
         // 3. Generar el Snapshot de TODOS los Items globales (Regla 12)
+        // El item de Sueldo Básico (token 'SBRU') arranca con el sueldo_basico del empleado
+        const empRes = await client.query('SELECT sueldo_basico FROM empleado WHERE id = $1', [empleado_id]);
+        const sueldoBasico = parseFloat(empRes.rows[0]?.sueldo_basico) || 0;
+
         const itemsGlobales = await client.query('SELECT * FROM item WHERE eliminado = FALSE');
 
         for (const item of itemsGlobales.rows) {
             await client.query(
                 `INSERT INTO liquidacion_item 
-                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token, valor_ingresado) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
                 [
                     liquidacion_id,
                     item.id,
@@ -47,7 +51,8 @@ const crearLiquidacion = async (req, res) => {
                     item.naturaleza,
                     item.formula,
                     item.porcentaje,
-                    item.base_token
+                    item.base_token,
+                    item.token === 'SBRU' ? sueldoBasico : null
                 ]
             );
         }
@@ -105,25 +110,37 @@ const actualizarBorrador = async (req, res) => {
         await client.query('BEGIN');
 
         // 1. Validar que la liquidación sigue en BORRADOR
-        const liqRes = await client.query('SELECT estado FROM liquidacion WHERE id = $1', [id]);
+        const liqRes = await client.query('SELECT estado, empleado_id FROM liquidacion WHERE id = $1', [id]);
         if (liqRes.rows[0].estado !== 'BORRADOR') {
             throw new Error('No se puede modificar una liquidación finalizada.');
         }
+        const empleadoId = liqRes.rows[0].empleado_id;
 
         // 2. Actualizar los valores en liquidacion_item
         for (const item of items) {
+            // El Sueldo Básico (SBRU) nunca puede desactivarse
+            const activo = item.token === 'SBRU' ? true : item.activo;
             await client.query(
                 `UPDATE liquidacion_item 
                  SET activo = $1, valor_ingresado = $2, porcentaje = $3, resultado = $4 
                  WHERE id = $5 AND liquidacion_id = $6`,
                 [
-                    item.activo,
+                    activo,
                     item.tipo === 'MANUAL' ? (item.valor_ingresado || null) : null,
                     item.tipo === 'PORCENTAJE' ? (item.porcentaje || null) : null,
                     resultados[item.id] || 0,
                     item.id,
                     id
                 ]
+            );
+        }
+
+        // 3. Si se editó el Sueldo Básico, actualizar el sueldo_basico del empleado
+        const sbr = items.find(i => i.token === 'SBRU' && i.valor_ingresado !== null && i.valor_ingresado !== '');
+        if (sbr) {
+            await client.query(
+                'UPDATE empleado SET sueldo_basico = $1 WHERE id = $2',
+                [parseFloat(sbr.valor_ingresado) || 0, empleadoId]
             );
         }
 

@@ -7,7 +7,7 @@ const getClientes = async (req, res) => {
             'SELECT id, cuit, razon_social, domicilio_laboral FROM cliente WHERE eliminado = FALSE ORDER BY razon_social'
         );
         const empleadosRes = await pool.query(
-            'SELECT id, cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id FROM empleado WHERE eliminado = FALSE ORDER BY apellido, nombre'
+            'SELECT id, cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico FROM empleado WHERE eliminado = FALSE ORDER BY apellido, nombre'
         );
         const liquidacionesRes = await pool.query(
             'SELECT id, empleado_id, anio, mes, estado FROM liquidacion WHERE eliminado = FALSE'
@@ -44,11 +44,11 @@ const createCliente = async (req, res) => {
 };
 
 const createEmpleado = async (req, res) => {
-    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id } = req.body;
+    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico } = req.body;
     try {
         const result = await pool.query(
-            'INSERT INTO empleado (cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-            [cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id]
+            'INSERT INTO empleado (cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+            [cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico || 0]
         );
         res.json({ id: result.rows[0].id, mensaje: 'Empleado creado exitosamente.' });
     } catch (error) {
