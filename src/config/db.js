@@ -18,7 +18,4 @@ pool.connect((err, client, release) => {
   release();
 });
 
-module.exports = {
-  query: (text, params) => pool.query(text, params),
-  getPool: () => pool
-};
+module.exports = pool;
