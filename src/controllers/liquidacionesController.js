@@ -169,5 +169,71 @@ const actualizarBorrador = async (req, res) => {
 };
 
 // Asegúrate de que el module.exports al final del archivo luzca así:
-// module.exports = { crearLiquidacion, getLiquidacion, actualizarBorrador };
+// Finaliza la liquidación congelándola permanentemente (Regla 41)
+const finalizarLiquidacion = async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const result = await pool.query(
+            "UPDATE liquidacion SET estado = 'FINALIZADA' WHERE id = $1 AND estado = 'BORRADOR' RETURNING id",
+            [id]
+        );
+
+        if (result.rowCount === 0) {
+            return res.status(400).json({ error: 'La liquidación ya está finalizada o no existe.' });
+        }
+
+        res.json({ mensaje: 'Liquidación finalizada correctamente. El registro ha sido congelado.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al finalizar la liquidación.' });
+    }
+};
+
+// Copia configuración masiva (Regla 14)
+const copiarConfiguracion = async (req, res) => {
+    const { id: id_destino } = req.params; // La liquidación que estamos editando
+    const { liquidacion_origen_id } = req.body;
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        // Validar que el destino esté en borrador
+        const liqDestino = await client.query('SELECT estado FROM liquidacion WHERE id = $1', [id_destino]);
+        if (liqDestino.rows[0].estado !== 'BORRADOR') {
+            throw new Error('No se puede modificar una liquidación finalizada.');
+        }
+
+        // Traer los items de la liquidación origen
+        const origenRes = await client.query(
+            'SELECT item_id, activo, porcentaje FROM liquidacion_item WHERE liquidacion_id = $1',
+            [liquidacion_origen_id]
+        );
+
+        // Actualizar el destino basado en el origen
+        // REGLA: Copia activo/inactivo. Copia porcentaje. NO copia valor_ingresado (manual).
+        for (const itemOrigen of origenRes.rows) {
+            await client.query(
+                `UPDATE liquidacion_item 
+                 SET activo = $1, 
+                     porcentaje = (CASE WHEN tipo = 'PORCENTAJE' THEN $2 ELSE porcentaje END)
+                 WHERE liquidacion_id = $3 AND item_id = $4`,
+                [itemOrigen.activo, itemOrigen.porcentaje, id_destino, itemOrigen.item_id]
+            );
+        }
+
+        await client.query('COMMIT');
+        res.json({ mensaje: 'Configuración copiada exitosamente.' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: error.message });
+    } finally {
+        client.release();
+    }
+};
+
+// Recuerda agregar estas dos funciones a tu module.exports al final del archivo.
+
+module.exports = { crearLiquidacion, getLiquidacion, actualizarBorrador, finalizarLiquidacion, copiarConfiguracion };
+module.exports = { crearLiquidacion, getLiquidacion, actualizarBorrador };
 module.exports = { crearLiquidacion, getLiquidacion };
