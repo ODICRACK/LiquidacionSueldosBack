@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { crearLiquidacion, getLiquidacion, actualizarBorrador, finalizarLiquidacion, copiarConfiguracion } = require('../controllers/liquidacionesController');
-const { generarReciboPDF } = require('../controllers/pdfController');
+const { getDatosRecibo } = require('../controllers/reciboController');
 const authMiddleware = require('../middleware/authMiddleware');
 
 router.use(authMiddleware);
@@ -11,6 +11,6 @@ router.get('/:id', getLiquidacion);
 router.put('/:id/borrador', actualizarBorrador);
 router.put('/:id/finalizar', finalizarLiquidacion);
 router.post('/:id/copiar', copiarConfiguracion);
-router.get('/:id/pdf', generarReciboPDF);
+router.get('/:id/recibo', getDatosRecibo);
 
 module.exports = router;
