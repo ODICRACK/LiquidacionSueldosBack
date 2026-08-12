@@ -58,5 +58,22 @@ const bajaCategoria = async (req, res) => {
         res.status(500).json({ error: 'Error al dar de baja la categoría.' });
     }
 };
+const reactivarCategoria = async (req, res) => {
+    const { id } = req.params;
 
-module.exports = { getCategorias, createCategoria, updateCategoria, bajaCategoria };
+    try {
+        const result = await pool.query('UPDATE categoria SET eliminado = FALSE WHERE id = $1 RETURNING id', [id]);
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Categoría no encontrada.' });
+        res.json({ mensaje: 'Categoría reactivada exitosamente.' });
+    } catch (error) {
+        // 23505 es el código de error de PostgreSQL para violación de índice único
+        if (error.code === '23505') {
+            return res.status(400).json({ error: 'No se puede reactivar porque ya creaste otra categoría activa con el mismo nombre.' });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Error al reactivar la categoría.' });
+    }
+};
+
+// Recuerda actualizar tu exportación para incluirla:
+module.exports = { getCategorias, createCategoria, updateCategoria, bajaCategoria, reactivarCategoria };
