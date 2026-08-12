@@ -88,9 +88,9 @@ const deleteItem = async (req, res) => {
         const itemRes = await pool.query('SELECT token FROM item WHERE id = $1', [id]);
         const tokenAEliminar = itemRes.rows[0]?.token;
 
-        // El Sueldo Básico (SBRU) es parte del núcleo del recibo: no puede eliminarse
-        if (tokenAEliminar === 'SBRU') {
-            return res.status(400).json({ error: 'El Sueldo Básico (SBRU) no puede eliminarse.' });
+        // El Sueldo Básico (SB) es parte del núcleo del recibo: no puede eliminarse
+        if (tokenAEliminar === 'SB') {
+            return res.status(400).json({ error: 'El Sueldo Básico (SB) no puede eliminarse.' });
         }
 
         // Verificar si es dependencia de alguna fórmula o base de porcentaje activa

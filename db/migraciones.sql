@@ -9,6 +9,13 @@ ALTER TABLE item ADD COLUMN IF NOT EXISTS base_token VARCHAR(20);
 ALTER TABLE liquidacion_item ADD COLUMN IF NOT EXISTS base_token VARCHAR(20);
 
 -- Migración: Sueldo Básico del empleado
--- El item con token 'SBRU' (Sueldo Bruto) toma por defecto este valor en cada liquidación.
+-- El item con token 'SB' (Sueldo Básico) toma por defecto este valor en cada liquidación.
 -- Al editarse dentro de una liquidación, el valor se guarda también acá.
+-- Es un item DISTINTO de "Sueldo Bruto" (SBRU), que se carga manualmente.
 ALTER TABLE empleado ADD COLUMN IF NOT EXISTS sueldo_basico NUMERIC(12,2) NOT NULL DEFAULT 0;
+
+-- Item global "Sueldo Básico" (token SB), el núcleo del recibo de sueldo.
+-- No puede eliminarse ni desactivarse dentro de una liquidación.
+INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje, base_token)
+SELECT 'Sueldo Básico', 'SB', 'MANUAL', 'SUMA', NULL, NULL, NULL
+WHERE NOT EXISTS (SELECT 1 FROM item WHERE token = 'SB');

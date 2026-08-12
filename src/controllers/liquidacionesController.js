@@ -30,7 +30,7 @@ const crearLiquidacion = async (req, res) => {
         const liquidacion_id = liqRes.rows[0].id;
 
         // 3. Generar el Snapshot de TODOS los Items globales (Regla 12)
-        // El item de Sueldo Básico (token 'SBRU') arranca con el sueldo_basico del empleado
+        // El item de Sueldo Básico (token 'SB') arranca con el sueldo_basico del empleado
         const empRes = await client.query('SELECT sueldo_basico FROM empleado WHERE id = $1', [empleado_id]);
         const sueldoBasico = parseFloat(empRes.rows[0]?.sueldo_basico) || 0;
 
@@ -52,7 +52,7 @@ const crearLiquidacion = async (req, res) => {
                     item.formula,
                     item.porcentaje,
                     item.base_token,
-                    item.token === 'SBRU' ? sueldoBasico : null
+                    item.token === 'SB' ? sueldoBasico : null
                 ]
             );
         }
@@ -118,8 +118,8 @@ const actualizarBorrador = async (req, res) => {
 
         // 2. Actualizar los valores en liquidacion_item
         for (const item of items) {
-            // El Sueldo Básico (SBRU) nunca puede desactivarse
-            const activo = item.token === 'SBRU' ? true : item.activo;
+            // El Sueldo Básico (SB) nunca puede desactivarse
+            const activo = item.token === 'SB' ? true : item.activo;
             await client.query(
                 `UPDATE liquidacion_item 
                  SET activo = $1, valor_ingresado = $2, porcentaje = $3, resultado = $4 
@@ -136,7 +136,7 @@ const actualizarBorrador = async (req, res) => {
         }
 
         // 3. Si se editó el Sueldo Básico, actualizar el sueldo_basico del empleado
-        const sbr = items.find(i => i.token === 'SBRU' && i.valor_ingresado !== null && i.valor_ingresado !== '');
+        const sbr = items.find(i => i.token === 'SB' && i.valor_ingresado !== null && i.valor_ingresado !== '');
         if (sbr) {
             await client.query(
                 'UPDATE empleado SET sueldo_basico = $1 WHERE id = $2',
