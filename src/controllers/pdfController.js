@@ -31,7 +31,7 @@ const generarReciboPDF = async (req, res) => {
         const liqRes = await pool.query('SELECT * FROM liquidacion WHERE id = $1', [id]);
         const itemsRes = await pool.query('SELECT * FROM liquidacion_item WHERE liquidacion_id = $1 AND activo = TRUE', [id]);
         const catRes = await pool.query('SELECT * FROM liquidacion_categoria WHERE liquidacion_id = $1', [id]);
-        
+
         if (liqRes.rows.length === 0) return res.status(404).json({ error: 'Liquidación no encontrada' });
 
         const liquidacion = liqRes.rows[0];
@@ -41,10 +41,10 @@ const generarReciboPDF = async (req, res) => {
         // 2. Generar el Gráfico de Torta en B/N (Base64)
         const labels = categorias.map(c => c.nombre);
         const data = categorias.map(c => parseFloat(c.total));
-        
+
         // Generar patrones monocromáticos para cada porción
         const backgroundColors = pattern.generate(
-            ['diagonal', 'cross', 'dash', 'dot-dash', 'dot', 'zigzag'], 
+            ['diagonal', 'cross', 'dash', 'dot-dash', 'dot', 'zigzag'],
             '#000000', // Color del patrón (negro)
             '#ffffff'  // Color de fondo (blanco)
         );
@@ -159,15 +159,20 @@ const generarReciboPDF = async (req, res) => {
         `;
 
         // 5. Generar PDF con Puppeteer
-        const browser = await puppeteer.launch({ 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'], // Necesario en entornos como Render
-            headless: 'new'
+        const browser = await puppeteer.launch({
+            headless: true, // o 'new' dependiendo de tu versión
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
         });
         const page = await browser.newPage();
         await page.setContent(html, { waitUntil: 'networkidle0' });
-        
-        const pdfBuffer = await page.pdf({ 
-            format: 'A4', 
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
             printBackground: true,
             margin: { top: '10mm', right: '10mm', bottom: '10mm', left: '10mm' }
         });
