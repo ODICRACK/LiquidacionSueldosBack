@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { redondear } = require('../utils/mathEngine');
 
 const crearLiquidacion = async (req, res) => {
     const { empleado_id, anio, mes } = req.body;
@@ -71,6 +72,17 @@ const crearLiquidacion = async (req, res) => {
         res.json({ liquidacion_id, mensaje: 'Liquidación inicializada correctamente.' });
     } catch (error) {
         await client.query('ROLLBACK');
+        // Violación del índice único (empleado, anio, mes): otra petición concurrente ganó la carrera
+        if (error.code === '23505') {
+            const existente = await client.query(
+                'SELECT id FROM liquidacion WHERE empleado_id = $1 AND anio = $2 AND mes = $3 AND eliminado = FALSE',
+                [empleado_id, anio, mes]
+            );
+            return res.status(409).json({
+                error: 'La liquidación ya existe para este período.',
+                liquidacion_id: existente.rows[0]?.id
+            });
+        }
         console.error(error);
         res.status(500).json({ error: 'Error al inicializar la liquidación.' });
     } finally {
@@ -172,7 +184,7 @@ const actualizarBorrador = async (req, res) => {
         for (const [catId, total] of Object.entries(categoriasTotales)) {
             await client.query(
                 'UPDATE liquidacion_categoria SET total = $1 WHERE liquidacion_id = $2 AND categoria_id = $3',
-                [total, id, catId]
+                [redondear(total), id, catId]
             );
         }
 
@@ -190,19 +202,33 @@ const actualizarBorrador = async (req, res) => {
 // Finaliza la liquidación congelándola permanentemente (Regla 41)
 const finalizarLiquidacion = async (req, res) => {
     const { id } = req.params;
-    
+
     try {
-        const result = await pool.query(
-            "UPDATE liquidacion SET estado = 'FINALIZADA' WHERE id = $1 AND estado = 'BORRADOR' RETURNING id",
+        const liqRes = await pool.query('SELECT estado FROM liquidacion WHERE id = $1 AND eliminado = FALSE', [id]);
+        if (liqRes.rows.length === 0) {
+            return res.status(400).json({ error: 'La liquidación no existe.' });
+        }
+        if (liqRes.rows[0].estado !== 'BORRADOR') {
+            return res.status(400).json({ error: 'La liquidación ya está finalizada.' });
+        }
+
+        // Guarda de integridad: no congelar un histórico con items activos sin resultado calculado
+        const pendientesRes = await pool.query(
+            'SELECT COUNT(*)::int AS cantidad FROM liquidacion_item WHERE liquidacion_id = $1 AND activo = TRUE AND resultado IS NULL',
+            [id]
+        );
+        if (pendientesRes.rows[0].cantidad > 0) {
+            return res.status(400).json({ error: 'Hay items activos sin resultado calculado. Guarde el borrador antes de finalizar.' });
+        }
+
+        await pool.query(
+            "UPDATE liquidacion SET estado = 'FINALIZADA' WHERE id = $1 AND estado = 'BORRADOR'",
             [id]
         );
 
-        if (result.rowCount === 0) {
-            return res.status(400).json({ error: 'La liquidación ya está finalizada o no existe.' });
-        }
-
         res.json({ mensaje: 'Liquidación finalizada correctamente. El registro ha sido congelado.' });
     } catch (error) {
+        console.error(error);
         res.status(500).json({ error: 'Error al finalizar la liquidación.' });
     }
 };
