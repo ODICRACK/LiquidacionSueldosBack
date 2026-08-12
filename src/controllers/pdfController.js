@@ -4,6 +4,20 @@ const { ChartJSNodeCanvas } = require('chartjs-node-canvas');
 const pattern = require('patternomaly');
 const { calcularTotales } = require('../utils/mathEngine');
 
+const { createCanvas } = require('canvas');
+
+// Parche global para que patternomaly funcione en Node.js sin un navegador real
+if (typeof global.document === 'undefined') {
+    global.document = {
+        createElement: (type) => {
+            if (type === 'canvas') {
+                return createCanvas(1, 1);
+            }
+            return {};
+        }
+    };
+}
+
 // Configuración del renderizador de gráficos (ancho y alto)
 const width = 400;
 const height = 400;
