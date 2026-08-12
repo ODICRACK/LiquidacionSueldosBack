@@ -1,12 +1,29 @@
 const pool = require('../config/db');
 const { redondear } = require('../utils/mathEngine');
+const { validarMes, validarAnio } = require('../utils/validators');
 
 const crearLiquidacion = async (req, res) => {
     const { empleado_id, anio, mes } = req.body;
+
+    try {
+        validarAnio(anio);
+        validarMes(mes);
+    } catch (error) {
+        return res.status(400).json({ error: error.message });
+    }
+
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
+
+        // 0. Un empleado dado de baja no puede iniciar nuevas liquidaciones
+        const empRes = await client.query('SELECT id, eliminado, sueldo_basico FROM empleado WHERE id = $1', [empleado_id]);
+        if (empRes.rows.length === 0 || empRes.rows[0].eliminado) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'No se puede iniciar una liquidación para un empleado dado de baja.' });
+        }
+        const sueldoBasico = parseFloat(empRes.rows[0].sueldo_basico) || 0;
 
         // 1. Validar la Regla 19: Solo una liquidación activa por empleado/período
         const existe = await client.query(
@@ -32,9 +49,6 @@ const crearLiquidacion = async (req, res) => {
 
         // 3. Generar el Snapshot de TODOS los Items globales (Regla 12)
         // El item de Sueldo Básico (token 'SB') arranca con el sueldo_basico del empleado
-        const empRes = await client.query('SELECT sueldo_basico FROM empleado WHERE id = $1', [empleado_id]);
-        const sueldoBasico = parseFloat(empRes.rows[0]?.sueldo_basico) || 0;
-
         const itemsGlobales = await client.query('SELECT * FROM item WHERE eliminado = FALSE');
 
         for (const item of itemsGlobales.rows) {

@@ -19,3 +19,9 @@ ALTER TABLE empleado ADD COLUMN IF NOT EXISTS sueldo_basico NUMERIC(12,2) NOT NU
 INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje, base_token)
 SELECT 'Sueldo Básico', 'SB', 'MANUAL', 'SUMA', NULL, NULL, NULL
 WHERE NOT EXISTS (SELECT 1 FROM item WHERE token = 'SB');
+
+-- Migración: índice de nombre de categoría que respeta el soft delete.
+-- Con esto una categoría dada de baja puede volver a crearse con el mismo nombre
+-- sin violar la unicidad (los snapshots históricos conservan su nombre propio).
+ALTER TABLE categoria DROP CONSTRAINT IF EXISTS categoria_nombre_key;
+CREATE UNIQUE INDEX IF NOT EXISTS categoria_nombre_key ON categoria (nombre) WHERE eliminado = FALSE;

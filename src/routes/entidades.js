@@ -1,14 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const { getClientes, createCliente, createEmpleado } = require('../controllers/entidadesController');
+const {
+    getClientes, getCliente, getEmpleado,
+    createCliente, updateCliente, bajaCliente,
+    createEmpleado, updateEmpleado, bajaEmpleado
+} = require('../controllers/entidadesController');
 const authMiddleware = require('../middleware/authMiddleware');
 const pool = require('../config/db');
 
 router.use(authMiddleware);
 
 router.get('/clientes', getClientes);
+router.get('/clientes/:id', getCliente);
 router.post('/clientes', createCliente);
+router.put('/clientes/:id', updateCliente);
+router.delete('/clientes/:id', bajaCliente);
+
+router.get('/empleados/:id', getEmpleado);
 router.post('/empleados', createEmpleado);
+router.put('/empleados/:id', updateEmpleado);
+router.delete('/empleados/:id', bajaEmpleado);
 
 // Endpoint para el Modal de Copiar Configuración
 router.get('/empleados/:id/liquidaciones', async (req, res) => {
