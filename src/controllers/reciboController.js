@@ -5,10 +5,11 @@ const getDatosRecibo = async (req, res) => {
 
     try {
         // 1. Obtener datos básicos: liquidación, empleado y cliente
+        // CORRECCIÓN: Quitamos l.sueldo_bruto y agregamos e.sueldo_basico
         const liqRes = await pool.query(`
             SELECT 
-                l.id AS liquidacion_id, l.mes, l.anio, l.estado, l.sueldo_bruto,
-                e.nombre, e.apellido, e.cuil, e.nro_legajo, e.fecha_ingreso,
+                l.id AS liquidacion_id, l.mes, l.anio, l.estado,
+                e.nombre, e.apellido, e.cuil, e.nro_legajo, e.fecha_ingreso, e.sueldo_basico,
                 c.razon_social, c.cuit, c.domicilio_laboral
             FROM liquidacion l
             JOIN empleado e ON l.empleado_id = e.id
@@ -59,7 +60,7 @@ const getDatosRecibo = async (req, res) => {
                 cuil: recibo.cuil,
                 legajo: recibo.nro_legajo,
                 fecha_ingreso: recibo.fecha_ingreso,
-                sueldo_basico: recibo.sueldo_bruto
+                sueldo_basico: recibo.sueldo_basico // CORRECCIÓN: Mapeamos sueldo_basico
             },
             liquidacion: {
                 periodo: `${String(recibo.mes).padStart(2, '0')}/${recibo.anio}`,
