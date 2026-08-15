@@ -36,8 +36,41 @@ const getDatosRecibo = async (req, res) => {
             WHERE liquidacion_id = $1
         `, [id]);
 
-        // --- DICCIONARIO DE CONTEXTO ---
+        // --- 1. CALCULAR ANTIGÜEDAD PARA EL CONTEXTO ---
+        let aniosAntiguedad = 0;
+        if (recibo.fecha_ingreso) {
+            const ingreso = new Date(recibo.fecha_ingreso);
+            aniosAntiguedad = recibo.anio - ingreso.getFullYear();
+            if (recibo.mes < ingreso.getMonth() + 1) {
+                aniosAntiguedad--;
+            }
+            aniosAntiguedad = Math.max(0, aniosAntiguedad);
+        }
+
+        // --- 2. CALCULAR TOTALES GLOBALES PARA EL CONTEXTO ---
+        let sumRem = 0;
+        let sumNoRem = 0;
+        let sumDesc = 0;
+
+        itemsRes.rows.forEach(item => {
+            const val = item.tipo === 'MANUAL' ? parseFloat(item.valor_ingresado || 0) : parseFloat(item.resultado || 0);
+            if (item.naturaleza === 'SUMA') sumRem += val;
+            if (item.naturaleza === 'NO_REMUNERATIVO') sumNoRem += val;
+            if (item.naturaleza === 'RESTA') sumDesc += val;
+        });
+
+        // --- 3. DICCIONARIO DE CONTEXTO ---
         const contexto = {};
+        
+        // Inyectamos las variables globales primero
+        contexto['ANIOS_ANTIGUEDAD'] = aniosAntiguedad;
+        contexto['TOTAL_REMUNERATIVO'] = sumRem;
+        contexto['TOTAL_NO_REM'] = sumNoRem;
+        contexto['TOTAL_BRUTO'] = sumRem + sumNoRem;
+        contexto['TOTAL_DESCUENTOS'] = sumDesc;
+        contexto['TOTAL_NETO'] = (sumRem + sumNoRem) - sumDesc;
+
+        // Inyectamos los tokens de los ítems de la BD
         itemsRes.rows.forEach(item => {
             const val = item.tipo === 'MANUAL' ? parseFloat(item.valor_ingresado || 0) : parseFloat(item.resultado || 0);
             contexto[item.token] = val;
@@ -54,14 +87,12 @@ const getDatosRecibo = async (req, res) => {
             return texto;
         };
 
-        // Función auxiliar para obtener el monto real (resultado calculado o valor ingresado)
         const getMontoItem = (item) => {
             const valResultado = parseFloat(item.resultado);
             if (!isNaN(valResultado) && valResultado !== 0) return valResultado;
             return parseFloat(item.valor_ingresado || 0);
         };
 
-        // 4. Estructurar y procesar conceptos una sola vez de forma unificada
         const conceptosProcesados = itemsRes.rows.map(item => ({
             ...item,
             monto_real: getMontoItem(item),
