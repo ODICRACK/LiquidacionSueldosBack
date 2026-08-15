@@ -62,7 +62,6 @@ const getDatosRecibo = async (req, res) => {
         // --- 3. DICCIONARIO DE CONTEXTO ---
         const contexto = {};
         
-        // Inyectamos las variables globales primero
         contexto['ANIOS_ANTIGUEDAD'] = aniosAntiguedad;
         contexto['TOTAL_REMUNERATIVO'] = sumRem;
         contexto['TOTAL_NO_REM'] = sumNoRem;
@@ -70,47 +69,10 @@ const getDatosRecibo = async (req, res) => {
         contexto['TOTAL_DESCUENTOS'] = sumDesc;
         contexto['TOTAL_NETO'] = (sumRem + sumNoRem) - sumDesc;
 
-        // Inyectamos los tokens de los ítems de la BD
         itemsRes.rows.forEach(item => {
             const val = item.tipo === 'MANUAL' ? parseFloat(item.valor_ingresado || 0) : parseFloat(item.resultado || 0);
             contexto[item.token] = val;
         });
-
-        // Función para resolver tokens escritos en las configuraciones visuales
-        // Mapeamos los ítems
-const conceptosProcesados = itemsRes.rows.map(item => {
-    let unidadFinal = item.unidad_imprimible;
-    let baseFinal = item.base_imprimible;
-
-    // MAGIA 1: Auto-relleno de Unidad y Base para Porcentajes
-    if (item.tipo === 'PORCENTAJE') {
-        if (!unidadFinal) unidadFinal = `${item.porcentaje}%`;
-        
-        // Si la base está vacía y usa un token global o un ítem, buscamos su valor
-        if (!baseFinal && item.base_token && contexto[item.base_token] !== undefined) {
-            baseFinal = contexto[item.base_token];
-        }
-    }
-
-    // Función interna para traducir cualquier token (incluyendo TOTAL_REMUNERATIVO) a dinero/número
-    const traducir = (texto) => {
-        if (!texto) return '-';
-        const txt = texto.toString().trim().toUpperCase();
-        // Si el texto es exactamente un token existente en el contexto
-        if (contexto[txt] !== undefined) {
-            const val = contexto[txt];
-            return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-        }
-        return texto;
-    };
-
-    return {
-        ...item,
-        monto_real: getMontoItem(item),
-        unidad_imprimible: traducir(unidadFinal),
-        base_imprimible: traducir(baseFinal)
-    };
-});
 
         const getMontoItem = (item) => {
             const valResultado = parseFloat(item.resultado);
@@ -118,12 +80,38 @@ const conceptosProcesados = itemsRes.rows.map(item => {
             return parseFloat(item.valor_ingresado || 0);
         };
 
-        const conceptosProcesados = itemsRes.rows.map(item => ({
-            ...item,
-            monto_real: getMontoItem(item),
-            unidad_imprimible: resolverTextoImprimible(item.unidad_imprimible),
-            base_imprimible: resolverTextoImprimible(item.base_imprimible)
-        }));
+        // --- MAGIA 1: Auto-relleno de Unidad y Base Inteligentes ---
+        const conceptosProcesados = itemsRes.rows.map(item => {
+            let unidadFinal = item.unidad_imprimible;
+            let baseFinal = item.base_imprimible;
+
+            // Auto-relleno de porcentajes y bases
+            if (item.tipo === 'PORCENTAJE') {
+                if (!unidadFinal) unidadFinal = `${item.porcentaje}%`;
+                
+                if (!baseFinal && item.base_token && contexto[item.base_token] !== undefined) {
+                    baseFinal = contexto[item.base_token];
+                }
+            }
+
+            // Traductor de tokens a dinero
+            const traducir = (texto) => {
+                if (!texto) return '-';
+                const txt = texto.toString().trim().toUpperCase();
+                if (contexto[txt] !== undefined) {
+                    const val = contexto[txt];
+                    return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                }
+                return texto; // Si es una fórmula o texto que no es un token, lo imprime tal cual
+            };
+
+            return {
+                ...item,
+                monto_real: getMontoItem(item),
+                unidad_imprimible: traducir(unidadFinal),
+                base_imprimible: traducir(baseFinal)
+            };
+        });
 
         const haberes = conceptosProcesados.filter(i => i.naturaleza === 'SUMA');
         const no_remunerativos = conceptosProcesados.filter(i => i.naturaleza === 'NO_REMUNERATIVO');
