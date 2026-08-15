@@ -6,7 +6,6 @@ const getDatosRecibo = async (req, res) => {
     const { id } = req.params;
 
     try {
-        // 1. Obtener datos básicos de la liquidación "congelada" y el empleado
         const liqRes = await pool.query(`
             SELECT 
                 l.id AS liquidacion_id, l.mes, l.anio, l.estado, l.categoria_laboral, l.banco, l.fecha_pago_aportes,
@@ -24,44 +23,63 @@ const getDatosRecibo = async (req, res) => {
 
         const recibo = liqRes.rows[0];
 
-        // 2. Obtener los items calculados (trayendo los nuevos campos de impresión)
         const itemsRes = await pool.query(`
-            SELECT nombre, token, tipo, naturaleza, formula, porcentaje, valor_ingresado, unidad_imprimible, base_imprimible
+            SELECT nombre, token, tipo, naturaleza, formula, porcentaje, valor_ingresado, unidad_imprimible, base_imprimible, resultado
             FROM liquidacion_item
             WHERE liquidacion_id = $1 AND activo = TRUE
             ORDER BY id ASC
         `, [id]);
 
-        // 3. Obtener los totales por categoría para el gráfico
         const catRes = await pool.query(`
             SELECT nombre, total
             FROM liquidacion_categoria
             WHERE liquidacion_id = $1
         `, [id]);
 
-        // 4. Estructurar conceptos en los nuevos grupos
-        const conceptos = itemsRes.rows;
-        const haberes = conceptos.filter(i => i.naturaleza === 'SUMA');
-        const no_remunerativos = conceptos.filter(i => i.naturaleza === 'NO_REMUNERATIVO');
-        const retenciones = conceptos.filter(i => i.naturaleza === 'RESTA');
-        const informativos = conceptos.filter(i => i.naturaleza === 'INFORMATIVO');
+        // --- DICCIONARIO DE CONTEXTO ---
+        // Creamos un mapa token -> valor para poder traducir textos como "DIAS_TRAB" o "SB"
+        const contexto = {};
+        itemsRes.rows.forEach(item => {
+            // Si es manual, vale su valor ingresado; si no, su resultado calculado
+            const val = item.tipo === 'MANUAL' ? parseFloat(item.valor_ingresado || 0) : parseFloat(item.resultado || 0);
+            contexto[item.token] = val;
+        });
 
-        const totalHaberes = haberes.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || 0), 0);
-        const totalNoRemunerativos = no_remunerativos.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || 0), 0);
-        const totalRetenciones = retenciones.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || 0), 0);
+        // Función para resolver tokens escritos en las configuraciones visuales
+        const resolverTextoImprimible = (texto) => {
+            if (!texto) return '-';
+            const tokenLimpio = texto.trim().toUpperCase();
+            // Si el texto coincide exactamente con un token existente, devolvemos su valor formateado
+            if (contexto[tokenLimpio] !== undefined) {
+                const val = contexto[tokenLimpio];
+                // Si es un número entero (como los días), lo mostramos sin decimales extra, si tiene centavos con formato monetario
+                return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+            }
+            return texto; // Si es texto plano (ej: "30" o "11%"), lo devuelve tal cual
+        };
+
+        // Procesamos los ítems aplicando la resolución de tokens en unidad y base
+        const conceptosProcesados = itemsRes.rows.map(item => ({
+            ...item,
+            unidad_imprimible: resolverTextoImprimible(item.unidad_imprimible),
+            base_imprimible: resolverTextoImprimible(item.base_imprimible)
+        }));
+
+        const haberes = conceptosProcesados.filter(i => i.naturaleza === 'SUMA');
+        const no_remunerativos = conceptosProcesados.filter(i => i.naturaleza === 'NO_REMUNERATIVO');
+        const retenciones = conceptosProcesados.filter(i => i.naturaleza === 'RESTA');
+        const informativos = conceptosProcesados.filter(i => i.naturaleza === 'INFORMATIVO');
+
+        const totalHaberes = haberes.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
+        const totalNoRemunerativos = no_remunerativos.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
+        const totalRetenciones = retenciones.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
         
-        // Nueva lógica matemática: (Remunerativos + No Remunerativos) - Descuentos
         const sueldoNeto = (totalHaberes + totalNoRemunerativos) - totalRetenciones;
 
-        // 5. Formateo de fechas para el PDF
-        // Formato abr-26
         const periodoFormateado = `${mesesAbrev[recibo.mes - 1]}-${String(recibo.anio).slice(-2)}`;
-        
-        // Fecha actual para mostrar el mes de emisión real
         const fechaActual = new Date();
         const mesActualFormateado = `${String(fechaActual.getMonth() + 1).padStart(2, '0')}/${fechaActual.getFullYear()}`;
 
-        // Devolver la estructura final al frontend
         res.json({
             empresa: {
                 razon_social: recibo.razon_social,
