@@ -65,14 +65,29 @@ const getDatosRecibo = async (req, res) => {
             base_imprimible: resolverTextoImprimible(item.base_imprimible)
         }));
 
+        // Función auxiliar para obtener el monto real (resultado calculado o valor ingresado)
+        const getMontoItem = (item) => {
+            const valResultado = parseFloat(item.resultado);
+            if (!isNaN(valResultado) && valResultado !== 0) return valResultado;
+            return parseFloat(item.valor_ingresado || 0);
+        };
+
+        // 4. Estructurar conceptos en los nuevos grupos
+        const conceptosProcesados = itemsRes.rows.map(item => ({
+            ...item,
+            monto_real: getMontoItem(item), // <-- Guardamos el monto real calculado
+            unidad_imprimible: resolverTextoImprimible(item.unidad_imprimible),
+            base_imprimible: resolverTextoImprimible(item.base_imprimible)
+        }));
+
         const haberes = conceptosProcesados.filter(i => i.naturaleza === 'SUMA');
         const no_remunerativos = conceptosProcesados.filter(i => i.naturaleza === 'NO_REMUNERATIVO');
         const retenciones = conceptosProcesados.filter(i => i.naturaleza === 'RESTA');
         const informativos = conceptosProcesados.filter(i => i.naturaleza === 'INFORMATIVO');
 
-        const totalHaberes = haberes.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
-        const totalNoRemunerativos = no_remunerativos.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
-        const totalRetenciones = retenciones.reduce((acc, curr) => acc + parseFloat(curr.valor_ingresado || curr.resultado || 0), 0);
+        const totalHaberes = haberes.reduce((acc, curr) => acc + curr.monto_real, 0);
+        const totalNoRemunerativos = no_remunerativos.reduce((acc, curr) => acc + curr.monto_real, 0);
+        const totalRetenciones = retenciones.reduce((acc, curr) => acc + curr.monto_real, 0);
         
         const sueldoNeto = (totalHaberes + totalNoRemunerativos) - totalRetenciones;
 
