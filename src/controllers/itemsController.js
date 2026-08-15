@@ -5,6 +5,7 @@ const { validarToken, validarOpcion } = require('../utils/validators');
 const TIPOS = ['PORCENTAJE', 'FORMULA', 'MANUAL'];
 // AGREGAMOS LA NUEVA NATURALEZA
 const NATURALEZAS = ['SUMA', 'RESTA', 'INFORMATIVO', 'AUXILIAR', 'NO_REMUNERATIVO'];
+const TOKENS_GLOBALES = ['TOTAL_REMUNERATIVO', 'TOTAL_NO_REM', 'TOTAL_BRUTO', 'TOTAL_DESCUENTOS', 'TOTAL_NETO'];
 
 const validarDependencias = async (client, token, tipo, formula, base_token, idExcluido) => {
     const itemsRes = idExcluido
@@ -16,7 +17,10 @@ const validarDependencias = async (client, token, tipo, formula, base_token, idE
     if (tipo === 'FORMULA') {
         validarFormulaChars(formula);
         const tokensUsados = extraerTokens(formula);
-        const tokensInexistentes = tokensUsados.filter(t => !tokensValidos.includes(t));
+        
+        // EXCEPCIÓN: Filtramos los tokens inexistentes, PERO perdonamos a los TOKENS_GLOBALES
+        const tokensInexistentes = tokensUsados.filter(t => !tokensValidos.includes(t) && !TOKENS_GLOBALES.includes(t));
+        
         if (tokensInexistentes.length > 0) {
             throw new Error(`La fórmula contiene tokens inexistentes: ${tokensInexistentes.join(', ')}`);
         }
@@ -28,7 +32,9 @@ const validarDependencias = async (client, token, tipo, formula, base_token, idE
     if (tipo === 'PORCENTAJE') {
         if (!base_token) throw new Error('Un item PORCENTAJE requiere un item base (base_token).');
         if (base_token === token) throw new Error('La base no puede ser el propio item.');
-        if (!tokensValidos.includes(base_token)) {
+        
+        // EXCEPCIÓN: Permitimos que la base sea un token normal o uno de los globales
+        if (!tokensValidos.includes(base_token) && !TOKENS_GLOBALES.includes(base_token)) {
             throw new Error(`La base "${base_token}" no existe entre los items activos.`);
         }
         if (detectarCiclo(token, { base_token }, itemsExistentes)) {
