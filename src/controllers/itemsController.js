@@ -5,7 +5,7 @@ const { validarToken, validarOpcion } = require('../utils/validators');
 const TIPOS = ['PORCENTAJE', 'FORMULA', 'MANUAL'];
 // AGREGAMOS LA NUEVA NATURALEZA
 const NATURALEZAS = ['SUMA', 'RESTA', 'INFORMATIVO', 'AUXILIAR', 'NO_REMUNERATIVO'];
-const TOKENS_GLOBALES = ['TOTAL_REMUNERATIVO', 'TOTAL_NO_REM', 'TOTAL_BRUTO', 'TOTAL_DESCUENTOS', 'TOTAL_NETO'];
+const TOKENS_GLOBALES = ['TOTAL_REMUNERATIVO', 'TOTAL_NO_REM', 'TOTAL_BRUTO', 'TOTAL_DESCUENTOS', 'TOTAL_NETO', "ANIOS_ANTIGUEDAD"];
 
 const validarDependencias = async (client, token, tipo, formula, base_token, idExcluido) => {
     const itemsRes = idExcluido

@@ -110,7 +110,12 @@ const getLiquidacion = async (req, res) => {
     const { id } = req.params;
 
     try {
-        const liqRes = await pool.query('SELECT * FROM liquidacion WHERE id = $1 AND eliminado = FALSE', [id]);
+        const liqRes = await pool.query(`
+            SELECT l.*, e.fecha_ingreso 
+            FROM liquidacion l
+            JOIN empleado e ON l.empleado_id = e.id
+            WHERE l.id = $1 AND l.eliminado = FALSE
+        `, [id]);
         if (liqRes.rows.length === 0) return res.status(404).json({ error: 'Liquidación no encontrada.' });
 
         const itemsRes = await pool.query('SELECT * FROM liquidacion_item WHERE liquidacion_id = $1 ORDER BY id', [id]);
