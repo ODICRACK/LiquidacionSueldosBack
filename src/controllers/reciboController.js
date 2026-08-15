@@ -37,10 +37,8 @@ const getDatosRecibo = async (req, res) => {
         `, [id]);
 
         // --- DICCIONARIO DE CONTEXTO ---
-        // Creamos un mapa token -> valor para poder traducir textos como "DIAS_TRAB" o "SB"
         const contexto = {};
         itemsRes.rows.forEach(item => {
-            // Si es manual, vale su valor ingresado; si no, su resultado calculado
             const val = item.tipo === 'MANUAL' ? parseFloat(item.valor_ingresado || 0) : parseFloat(item.resultado || 0);
             contexto[item.token] = val;
         });
@@ -49,21 +47,12 @@ const getDatosRecibo = async (req, res) => {
         const resolverTextoImprimible = (texto) => {
             if (!texto) return '-';
             const tokenLimpio = texto.trim().toUpperCase();
-            // Si el texto coincide exactamente con un token existente, devolvemos su valor formateado
             if (contexto[tokenLimpio] !== undefined) {
                 const val = contexto[tokenLimpio];
-                // Si es un número entero (como los días), lo mostramos sin decimales extra, si tiene centavos con formato monetario
                 return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
             }
-            return texto; // Si es texto plano (ej: "30" o "11%"), lo devuelve tal cual
+            return texto;
         };
-
-        // Procesamos los ítems aplicando la resolución de tokens en unidad y base
-        const conceptosProcesados = itemsRes.rows.map(item => ({
-            ...item,
-            unidad_imprimible: resolverTextoImprimible(item.unidad_imprimible),
-            base_imprimible: resolverTextoImprimible(item.base_imprimible)
-        }));
 
         // Función auxiliar para obtener el monto real (resultado calculado o valor ingresado)
         const getMontoItem = (item) => {
@@ -72,10 +61,10 @@ const getDatosRecibo = async (req, res) => {
             return parseFloat(item.valor_ingresado || 0);
         };
 
-        // 4. Estructurar conceptos en los nuevos grupos
+        // 4. Estructurar y procesar conceptos una sola vez de forma unificada
         const conceptosProcesados = itemsRes.rows.map(item => ({
             ...item,
-            monto_real: getMontoItem(item), // <-- Guardamos el monto real calculado
+            monto_real: getMontoItem(item),
             unidad_imprimible: resolverTextoImprimible(item.unidad_imprimible),
             base_imprimible: resolverTextoImprimible(item.base_imprimible)
         }));
