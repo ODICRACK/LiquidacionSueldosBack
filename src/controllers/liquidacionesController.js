@@ -41,7 +41,31 @@ const crearLiquidacion = async (req, res) => {
                 liquidacion_id: existe.rows[0].id
             });
         }
+        // 1. Buscamos la última liquidación finalizada de este empleado
+        const ultimaLiqRes = await pool.query(`
+    SELECT id FROM liquidacion 
+    WHERE empleado_id = $1 AND estado = 'FINALIZADA' AND eliminado = FALSE
+    ORDER BY anio DESC, mes DESC LIMIT 1
+`, [empleado_id]);
 
+        if (ultimaLiqRes.rows.length > 0) {
+            const idAnterior = ultimaLiqRes.rows[0].id;
+            // CLONAMOS LOS ÍTEMS DE LA ÚLTIMA LIQUIDACIÓN
+            // Copiamos todo EXACTAMENTE IGUAL (activos, porcentajes, fórmulas)
+            // EXCEPTO valor_ingresado, que lo ponemos en NULL para que lo llenen este mes
+            await pool.query(`
+        INSERT INTO liquidacion_item (liquidacion_id, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, valor_ingresado, activo)
+        SELECT $1, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, NULL, activo
+        FROM liquidacion_item WHERE liquidacion_id = $2
+    `, [nuevaLiquidacionId, idAnterior]);
+        } else {
+            // Si es su primera liquidación en la historia, hacemos el insert normal desde la tabla maestra "item"
+            await pool.query(`
+        INSERT INTO liquidacion_item (liquidacion_id, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, valor_ingresado, activo)
+        SELECT $1, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, NULL, TRUE
+        FROM item WHERE eliminado = FALSE
+    `, [nuevaLiquidacionId]);
+        }
         // 2. Crear la Liquidación en estado BORRADOR (Fotografiando categoría y banco)
         const liqRes = await client.query(
             'INSERT INTO liquidacion (empleado_id, anio, mes, estado, categoria_laboral, banco) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
@@ -280,10 +304,21 @@ const copiarConfiguracion = async (req, res) => {
     }
 };
 
-module.exports = { 
-    crearLiquidacion, 
-    getLiquidacion, 
-    actualizarBorrador, 
-    finalizarLiquidacion, 
-    copiarConfiguracion 
+const reabrirLiquidacion = async (req, res) => {
+    try {
+        await pool.query("UPDATE liquidacion SET estado = 'BORRADOR' WHERE id = $1", [req.params.id]);
+        res.json({ message: 'Liquidación reabierta con éxito.' });
+    } catch (error) {
+        res.status(500).json({ error: 'Error al reabrir la liquidación' });
+    }
+};
+// Recuerda exportarla
+
+module.exports = {
+    crearLiquidacion,
+    getLiquidacion,
+    actualizarBorrador,
+    finalizarLiquidacion,
+    copiarConfiguracion,
+    reabrirLiquidacion
 };

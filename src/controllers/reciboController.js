@@ -77,15 +77,40 @@ const getDatosRecibo = async (req, res) => {
         });
 
         // Función para resolver tokens escritos en las configuraciones visuales
-        const resolverTextoImprimible = (texto) => {
-            if (!texto) return '-';
-            const tokenLimpio = texto.trim().toUpperCase();
-            if (contexto[tokenLimpio] !== undefined) {
-                const val = contexto[tokenLimpio];
-                return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-            }
-            return texto;
-        };
+        // Mapeamos los ítems
+const conceptosProcesados = itemsRes.rows.map(item => {
+    let unidadFinal = item.unidad_imprimible;
+    let baseFinal = item.base_imprimible;
+
+    // MAGIA 1: Auto-relleno de Unidad y Base para Porcentajes
+    if (item.tipo === 'PORCENTAJE') {
+        if (!unidadFinal) unidadFinal = `${item.porcentaje}%`;
+        
+        // Si la base está vacía y usa un token global o un ítem, buscamos su valor
+        if (!baseFinal && item.base_token && contexto[item.base_token] !== undefined) {
+            baseFinal = contexto[item.base_token];
+        }
+    }
+
+    // Función interna para traducir cualquier token (incluyendo TOTAL_REMUNERATIVO) a dinero/número
+    const traducir = (texto) => {
+        if (!texto) return '-';
+        const txt = texto.toString().trim().toUpperCase();
+        // Si el texto es exactamente un token existente en el contexto
+        if (contexto[txt] !== undefined) {
+            const val = contexto[txt];
+            return Number.isInteger(val) ? val.toString() : `$ ${val.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        }
+        return texto;
+    };
+
+    return {
+        ...item,
+        monto_real: getMontoItem(item),
+        unidad_imprimible: traducir(unidadFinal),
+        base_imprimible: traducir(baseFinal)
+    };
+});
 
         const getMontoItem = (item) => {
             const valResultado = parseFloat(item.resultado);
