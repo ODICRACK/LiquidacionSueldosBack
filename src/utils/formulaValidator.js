@@ -2,14 +2,14 @@
 const extraerTokens = (formula) => {
     if (!formula) return [];
     // Busca palabras compuestas por letras mayúsculas (los tokens)
-    const matches = formula.match(/[A-Z]+/g);
+    const matches = formula.match(/[A-Z_]+/g);
     return matches ? [...new Set(matches)] : [];
 };
 
 // Valida que la fórmula solo contenga caracteres permitidos (sin eval ni código)
 const validarFormulaChars = (formula) => {
     if (!formula || !formula.trim()) throw new Error('La fórmula no puede estar vacía.');
-    const permitido = /^[A-Z0-9+\-*/%(). ]+$/;
+    const permitido = /^[A-Z_0-9+\-*/%(). ]+$/;
     if (!permitido.test(formula)) {
         throw new Error('La fórmula contiene caracteres no permitidos. Use solo letras A-Z, números, espacios y + - * / % ( ).');
     }
