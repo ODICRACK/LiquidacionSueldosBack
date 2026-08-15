@@ -1,16 +1,14 @@
 const pool = require('../config/db');
 const { validarRequerido, validarNumeroPositivo } = require('../utils/validators');
 
-// Obtiene todos los clientes y anida sus empleados con sus liquidaciones.
-// Incluye clientes y empleados dados de baja para que el frontend los muestre
-// en secciones separadas (los históricos siguen siendo consultables).
 const getClientes = async (req, res) => {
     try {
         const clientesRes = await pool.query(
             'SELECT id, cuit, razon_social, domicilio_laboral, eliminado FROM cliente ORDER BY razon_social'
         );
+        // AHORA TRAEMOS categoria_laboral Y banco
         const empleadosRes = await pool.query(
-            'SELECT id, cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico, eliminado FROM empleado ORDER BY apellido, nombre'
+            'SELECT id, cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico, categoria_laboral, banco, eliminado FROM empleado ORDER BY apellido, nombre'
         );
         const liquidacionesRes = await pool.query(
             'SELECT id, empleado_id, anio, mes, estado FROM liquidacion WHERE eliminado = FALSE'
@@ -103,7 +101,6 @@ const updateCliente = async (req, res) => {
     }
 };
 
-// Baja lógica de un cliente. En la misma transacción da de baja a todos sus empleados.
 const bajaCliente = async (req, res) => {
     const { id } = req.params;
     const client = await pool.connect();
@@ -131,7 +128,7 @@ const bajaCliente = async (req, res) => {
 };
 
 const createEmpleado = async (req, res) => {
-    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico } = req.body;
+    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico, categoria_laboral, banco } = req.body;
 
     try {
         validarRequerido(cuil, 'CUIL');
@@ -149,9 +146,10 @@ const createEmpleado = async (req, res) => {
             return res.status(400).json({ error: 'El cliente no existe o está dado de baja.' });
         }
 
+        // AHORA GUARDAMOS categoria_laboral Y banco
         const result = await pool.query(
-            'INSERT INTO empleado (cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-            [cuil, nombre, apellido, nro_legajo || null, fecha_ingreso || null, cliente_id, sueldo_basico || 0]
+            'INSERT INTO empleado (cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico, categoria_laboral, banco) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id',
+            [cuil, nombre, apellido, nro_legajo || null, fecha_ingreso || null, cliente_id, sueldo_basico || 0, categoria_laboral || null, banco || null]
         );
         res.json({ id: result.rows[0].id, mensaje: 'Empleado creado exitosamente.' });
     } catch (error) {
@@ -162,7 +160,7 @@ const createEmpleado = async (req, res) => {
 
 const updateEmpleado = async (req, res) => {
     const { id } = req.params;
-    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico } = req.body;
+    const { cuil, nombre, apellido, nro_legajo, fecha_ingreso, cliente_id, sueldo_basico, categoria_laboral, banco } = req.body;
 
     try {
         validarRequerido(cuil, 'CUIL');
@@ -180,10 +178,11 @@ const updateEmpleado = async (req, res) => {
             return res.status(400).json({ error: 'El cliente no existe o está dado de baja.' });
         }
 
+        // AHORA ACTUALIZAMOS categoria_laboral Y banco
         const result = await pool.query(
-            `UPDATE empleado SET cuil = $1, nombre = $2, apellido = $3, nro_legajo = $4, fecha_ingreso = $5, cliente_id = $6, sueldo_basico = $7
-             WHERE id = $8 RETURNING id`,
-            [cuil, nombre, apellido, nro_legajo || null, fecha_ingreso || null, cliente_id, sueldo_basico || 0, id]
+            `UPDATE empleado SET cuil = $1, nombre = $2, apellido = $3, nro_legajo = $4, fecha_ingreso = $5, cliente_id = $6, sueldo_basico = $7, categoria_laboral = $8, banco = $9
+             WHERE id = $10 RETURNING id`,
+            [cuil, nombre, apellido, nro_legajo || null, fecha_ingreso || null, cliente_id, sueldo_basico || 0, categoria_laboral || null, banco || null, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Empleado no encontrado.' });
         res.json({ mensaje: 'Empleado actualizado exitosamente.' });

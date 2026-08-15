@@ -18,12 +18,15 @@ const crearLiquidacion = async (req, res) => {
         await client.query('BEGIN');
 
         // 0. Un empleado dado de baja no puede iniciar nuevas liquidaciones
-        const empRes = await client.query('SELECT id, eliminado, sueldo_basico FROM empleado WHERE id = $1', [empleado_id]);
+        // AHORA TAMBIÉN TRAEMOS categoria_laboral Y banco
+        const empRes = await client.query('SELECT id, eliminado, sueldo_basico, categoria_laboral, banco FROM empleado WHERE id = $1', [empleado_id]);
         if (empRes.rows.length === 0 || empRes.rows[0].eliminado) {
             await client.query('ROLLBACK');
             return res.status(400).json({ error: 'No se puede iniciar una liquidación para un empleado dado de baja.' });
         }
         const sueldoBasico = parseFloat(empRes.rows[0].sueldo_basico) || 0;
+        const catLaboral = empRes.rows[0].categoria_laboral || null;
+        const bancoEmp = empRes.rows[0].banco || null;
 
         // 1. Validar la Regla 19: Solo una liquidación activa por empleado/período
         const existe = await client.query(
@@ -32,7 +35,6 @@ const crearLiquidacion = async (req, res) => {
         );
 
         if (existe.rows.length > 0) {
-            // Si ya existe, devolvemos el ID para que el frontend la abra en lugar de crear una nueva
             await client.query('ROLLBACK');
             return res.status(409).json({
                 error: 'La liquidación ya existe para este período.',
@@ -40,26 +42,25 @@ const crearLiquidacion = async (req, res) => {
             });
         }
 
-        // 2. Crear la Liquidación en estado BORRADOR
+        // 2. Crear la Liquidación en estado BORRADOR (Fotografiando categoría y banco)
         const liqRes = await client.query(
-            'INSERT INTO liquidacion (empleado_id, anio, mes, estado) VALUES ($1, $2, $3, $4) RETURNING id',
-            [empleado_id, anio, mes, 'BORRADOR']
+            'INSERT INTO liquidacion (empleado_id, anio, mes, estado, categoria_laboral, banco) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+            [empleado_id, anio, mes, 'BORRADOR', catLaboral, bancoEmp]
         );
         const liquidacion_id = liqRes.rows[0].id;
 
         // 3. Generar el Snapshot de TODOS los Items globales (Regla 12)
-        // El item de Sueldo Básico (token 'SB') arranca con el sueldo_basico del empleado
         const itemsGlobales = await client.query('SELECT * FROM item WHERE eliminado = FALSE');
 
         for (const item of itemsGlobales.rows) {
             await client.query(
                 `INSERT INTO liquidacion_item 
-                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token, valor_ingresado) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token, valor_ingresado, unidad_imprimible, base_imprimible) 
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
                 [
                     liquidacion_id,
                     item.id,
-                    true, // Por defecto inician activos (se pueden desactivar en la interfaz)
+                    true,
                     item.nombre,
                     item.token,
                     item.tipo,
@@ -67,7 +68,9 @@ const crearLiquidacion = async (req, res) => {
                     item.formula,
                     item.porcentaje,
                     item.base_token,
-                    item.token === 'SB' ? sueldoBasico : null
+                    item.token === 'SB' ? sueldoBasico : null,
+                    item.unidad_imprimible,
+                    item.base_imprimible
                 ]
             );
         }
@@ -86,7 +89,6 @@ const crearLiquidacion = async (req, res) => {
         res.json({ liquidacion_id, mensaje: 'Liquidación inicializada correctamente.' });
     } catch (error) {
         await client.query('ROLLBACK');
-        // Violación del índice único (empleado, anio, mes): otra petición concurrente ganó la carrera
         if (error.code === '23505') {
             const existente = await client.query(
                 'SELECT id FROM liquidacion WHERE empleado_id = $1 AND anio = $2 AND mes = $3 AND eliminado = FALSE',
@@ -108,14 +110,10 @@ const getLiquidacion = async (req, res) => {
     const { id } = req.params;
 
     try {
-        // Obtener datos principales de la liquidación
         const liqRes = await pool.query('SELECT * FROM liquidacion WHERE id = $1 AND eliminado = FALSE', [id]);
         if (liqRes.rows.length === 0) return res.status(404).json({ error: 'Liquidación no encontrada.' });
 
-        // Obtener los items congelados (snapshot)
         const itemsRes = await pool.query('SELECT * FROM liquidacion_item WHERE liquidacion_id = $1 ORDER BY id', [id]);
-
-        // Obtener las categorías congeladas (snapshot)
         const categoriasRes = await pool.query('SELECT * FROM liquidacion_categoria WHERE liquidacion_id = $1 ORDER BY id', [id]);
 
         res.json({
@@ -127,6 +125,7 @@ const getLiquidacion = async (req, res) => {
         res.status(500).json({ error: 'Error al obtener los datos de la liquidación.' });
     }
 };
+
 const actualizarBorrador = async (req, res) => {
     const { id } = req.params;
     const { items, resultados } = req.body;
@@ -135,16 +134,13 @@ const actualizarBorrador = async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        // 1. Validar que la liquidación sigue en BORRADOR
         const liqRes = await client.query('SELECT estado, empleado_id FROM liquidacion WHERE id = $1', [id]);
         if (liqRes.rows[0].estado !== 'BORRADOR') {
             throw new Error('No se puede modificar una liquidación finalizada.');
         }
         const empleadoId = liqRes.rows[0].empleado_id;
 
-        // 2. Actualizar los valores en liquidacion_item
         for (const item of items) {
-            // El Sueldo Básico (SB) nunca puede desactivarse
             const activo = item.token === 'SB' ? true : item.activo;
             await client.query(
                 `UPDATE liquidacion_item 
@@ -161,7 +157,6 @@ const actualizarBorrador = async (req, res) => {
             );
         }
 
-        // 3. Si se editó el Sueldo Básico, actualizar el sueldo_basico del empleado
         const sbr = items.find(i => i.token === 'SB' && i.valor_ingresado !== null && i.valor_ingresado !== '');
         if (sbr) {
             await client.query(
@@ -170,7 +165,6 @@ const actualizarBorrador = async (req, res) => {
             );
         }
 
-        // 3. Procesar y guardar los totales de Categorías (Feature nueva de Gráficos)
         const categoriasTotales = {};
 
         for (const item of items) {
@@ -194,7 +188,6 @@ const actualizarBorrador = async (req, res) => {
             }
         }
 
-        // ¡AQUÍ ESTABA EL ERROR CORREGIDO! (uso de "of")
         for (const [catId, total] of Object.entries(categoriasTotales)) {
             await client.query(
                 'UPDATE liquidacion_categoria SET total = $1 WHERE liquidacion_id = $2 AND categoria_id = $3',
@@ -212,8 +205,6 @@ const actualizarBorrador = async (req, res) => {
     }
 };
 
-// Asegúrate de que el module.exports al final del archivo luzca así:
-// Finaliza la liquidación congelándola permanentemente (Regla 41)
 const finalizarLiquidacion = async (req, res) => {
     const { id } = req.params;
 
@@ -226,7 +217,6 @@ const finalizarLiquidacion = async (req, res) => {
             return res.status(400).json({ error: 'La liquidación ya está finalizada.' });
         }
 
-        // Guarda de integridad: no congelar un histórico con items activos sin resultado calculado
         const pendientesRes = await pool.query(
             'SELECT COUNT(*)::int AS cantidad FROM liquidacion_item WHERE liquidacion_id = $1 AND activo = TRUE AND resultado IS NULL',
             [id]
@@ -235,8 +225,9 @@ const finalizarLiquidacion = async (req, res) => {
             return res.status(400).json({ error: 'Hay items activos sin resultado calculado. Guarde el borrador antes de finalizar.' });
         }
 
+        // AHORA ESTAMPAMOS LA FECHA DE PAGO AL FINALIZAR
         await pool.query(
-            "UPDATE liquidacion SET estado = 'FINALIZADA' WHERE id = $1 AND estado = 'BORRADOR'",
+            "UPDATE liquidacion SET estado = 'FINALIZADA', fecha_pago_aportes = CURRENT_DATE WHERE id = $1 AND estado = 'BORRADOR'",
             [id]
         );
 
@@ -247,29 +238,23 @@ const finalizarLiquidacion = async (req, res) => {
     }
 };
 
-// Copia configuración masiva (Regla 14)
 const copiarConfiguracion = async (req, res) => {
-    const { id: id_destino } = req.params; // La liquidación que estamos editando
+    const { id: id_destino } = req.params;
     const { liquidacion_origen_id } = req.body;
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
-
-        // Validar que el destino esté en borrador
         const liqDestino = await client.query('SELECT estado FROM liquidacion WHERE id = $1', [id_destino]);
         if (liqDestino.rows[0].estado !== 'BORRADOR') {
             throw new Error('No se puede modificar una liquidación finalizada.');
         }
 
-        // Traer los items de la liquidación origen
         const origenRes = await client.query(
             'SELECT item_id, activo, porcentaje FROM liquidacion_item WHERE liquidacion_id = $1',
             [liquidacion_origen_id]
         );
 
-        // Actualizar el destino basado en el origen
-        // REGLA: Copia activo/inactivo. Copia porcentaje. NO copia valor_ingresado (manual).
         for (const itemOrigen of origenRes.rows) {
             await client.query(
                 `UPDATE liquidacion_item 
@@ -289,8 +274,6 @@ const copiarConfiguracion = async (req, res) => {
         client.release();
     }
 };
-
-// Recuerda agregar estas dos funciones a tu module.exports al final del archivo.
 
 module.exports = { 
     crearLiquidacion, 

@@ -3,7 +3,8 @@ const { detectarCiclo, extraerTokens, validarFormulaChars } = require('../utils/
 const { validarToken, validarOpcion } = require('../utils/validators');
 
 const TIPOS = ['PORCENTAJE', 'FORMULA', 'MANUAL'];
-const NATURALEZAS = ['SUMA', 'RESTA', 'INFORMATIVO'];
+// AGREGAMOS LA NUEVA NATURALEZA
+const NATURALEZAS = ['SUMA', 'RESTA', 'INFORMATIVO', 'AUXILIAR', 'NO_REMUNERATIVO'];
 
 const validarDependencias = async (client, token, tipo, formula, base_token, idExcluido) => {
     const itemsRes = idExcluido
@@ -67,34 +68,40 @@ const getItemById = async (req, res) => {
 };
 
 const createItem = async (req, res) => {
-    const { nombre, token, tipo, naturaleza, formula, porcentaje, base_token, categorias } = req.body;
+    const { nombre, token, tipo, naturaleza, formula, porcentaje, base_token, categorias, unidad_imprimible, base_imprimible } = req.body;
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
 
-        // Validación de entrada
         validarRequeridoNombre(nombre);
         validarToken(token);
         validarOpcion(tipo, TIPOS, 'tipo');
         validarOpcion(naturaleza, NATURALEZAS, 'naturaleza');
 
-        // 1. Validar que el token no exista (ignorando eliminados)
         const existe = await client.query('SELECT id FROM item WHERE token = $1 AND eliminado = FALSE', [token]);
         if (existe.rows.length > 0) throw new Error(`El token ${token} ya existe.`);
 
-        // 2. Validar dependencias
         await validarDependencias(client, token, tipo, formula, base_token, null);
 
-        // 3. Insertar Item
+        // AHORA GUARDAMOS unidad_imprimible Y base_imprimible
         const itemRes = await client.query(
-            `INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje, base_token) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-            [nombre, token, tipo, naturaleza, formula || null, porcentaje || null, base_token || null]
+            `INSERT INTO item (nombre, token, tipo, naturaleza, formula, porcentaje, base_token, unidad_imprimible, base_imprimible) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+            [
+                nombre, 
+                token, 
+                tipo, 
+                naturaleza, 
+                formula || null, 
+                porcentaje || null, 
+                base_token || null,
+                unidad_imprimible || null,
+                base_imprimible || null
+            ]
         );
         const itemId = itemRes.rows[0].id;
 
-        // 4. Insertar relaciones con Categorías
         await insertarCategorias(client, itemId, categorias);
 
         await client.query('COMMIT');
@@ -109,13 +116,12 @@ const createItem = async (req, res) => {
 
 const updateItem = async (req, res) => {
     const { id } = req.params;
-    const { nombre, token, tipo, naturaleza, formula, porcentaje, base_token, categorias } = req.body;
+    const { nombre, token, tipo, naturaleza, formula, porcentaje, base_token, categorias, unidad_imprimible, base_imprimible } = req.body;
     const client = await pool.connect();
 
     try {
         await client.query('BEGIN');
 
-        // Validación de entrada
         validarRequeridoNombre(nombre);
         validarToken(token);
         validarOpcion(tipo, TIPOS, 'tipo');
@@ -125,12 +131,10 @@ const updateItem = async (req, res) => {
         if (itemActual.rows.length === 0) throw new Error('El item no existe.');
         const tokenOriginal = itemActual.rows[0].token;
 
-        // El Sueldo Básico (SB) es parte del núcleo del recibo: su token no puede cambiar
         if (tokenOriginal === 'SB' && token !== 'SB') {
             throw new Error('El token del Sueldo Básico (SB) no puede modificarse.');
         }
 
-        // Si el token cambia, verificar que no colisione y que no rompa dependencias activas
         if (token !== tokenOriginal) {
             const existe = await client.query(
                 'SELECT id FROM item WHERE token = $1 AND eliminado = FALSE AND id != $2',
@@ -150,14 +154,13 @@ const updateItem = async (req, res) => {
             }
         }
 
-        // 2. Validar dependencias del nuevo estado (excluyendo al item que se edita)
         await validarDependencias(client, token, tipo, formula, base_token, id);
 
-        // 3. Actualizar el Item
+        // AHORA ACTUALIZAMOS unidad_imprimible Y base_imprimible
         await client.query(
             `UPDATE item 
-             SET nombre = $1, token = $2, tipo = $3, naturaleza = $4, formula = $5, porcentaje = $6, base_token = $7
-             WHERE id = $8`,
+             SET nombre = $1, token = $2, tipo = $3, naturaleza = $4, formula = $5, porcentaje = $6, base_token = $7, unidad_imprimible = $8, base_imprimible = $9
+             WHERE id = $10`,
             [
                 nombre,
                 token,
@@ -166,11 +169,12 @@ const updateItem = async (req, res) => {
                 tipo === 'FORMULA' ? (formula || null) : null,
                 tipo === 'PORCENTAJE' ? (porcentaje || null) : null,
                 tipo === 'PORCENTAJE' ? (base_token || null) : null,
+                unidad_imprimible || null,
+                base_imprimible || null,
                 id
             ]
         );
 
-        // 4. Reemplazar relaciones con Categorías
         await client.query('DELETE FROM item_categoria WHERE item_id = $1', [id]);
         await insertarCategorias(client, id, categorias);
 
@@ -210,12 +214,10 @@ const deleteItem = async (req, res) => {
             return res.status(404).json({ error: 'El item no existe.' });
         }
 
-        // El Sueldo Básico (SB) es parte del núcleo del recibo: no puede eliminarse
         if (tokenAEliminar === 'SB') {
             return res.status(400).json({ error: 'El Sueldo Básico (SB) no puede eliminarse.' });
         }
 
-        // Verificar si es dependencia de alguna fórmula o base de porcentaje activa
         const dependenciasRes = await pool.query(
             'SELECT token, tipo, formula, base_token FROM item WHERE eliminado = FALSE AND id != $1',
             [id]
@@ -235,7 +237,6 @@ const deleteItem = async (req, res) => {
             }
         }
 
-        // Soft delete
         await pool.query('UPDATE item SET eliminado = TRUE WHERE id = $1', [id]);
         res.json({ mensaje: 'Item eliminado correctamente' });
     } catch (error) {
