@@ -242,6 +242,44 @@ const reabrirLiquidacion = async (req, res) => {
         res.status(500).json({ error: 'Error al reabrir la liquidación' });
     }
 };
+const sincronizarItems = async (req, res) => {
+    const { id } = req.params;
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+        
+        // 1. Verificamos que sea un borrador
+        const liqRes = await client.query('SELECT estado FROM liquidacion WHERE id = $1', [id]);
+        if (liqRes.rows.length === 0) throw new Error('Liquidación no encontrada.');
+        if (liqRes.rows[0].estado !== 'BORRADOR') throw new Error('Solo se pueden sincronizar borradores.');
+
+        // 2. Inyectamos los ítems maestros que NO existan en esta liquidación
+        await client.query(`
+            INSERT INTO liquidacion_item (
+                liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
+                base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
+            )
+            SELECT 
+                $1, i.id, i.token, i.nombre, i.tipo, i.naturaleza, i.formula, 
+                i.base_token, i.porcentaje, NULL, TRUE, i.unidad_imprimible, i.base_imprimible, i.orden
+            FROM item i
+            WHERE i.eliminado = FALSE 
+            AND NOT EXISTS (
+                SELECT 1 FROM liquidacion_item li 
+                WHERE li.liquidacion_id = $1 AND li.token = i.token
+            )
+        `, [id]);
+
+        await client.query('COMMIT');
+        res.json({ mensaje: 'Nuevos ítems sincronizados correctamente.' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ error: error.message });
+    } finally {
+        client.release();
+    }
+};
 // Recuerda exportarla
 
 module.exports = {
@@ -250,5 +288,6 @@ module.exports = {
     actualizarBorrador,
     finalizarLiquidacion,
     copiarConfiguracion,
-    reabrirLiquidacion
+    reabrirLiquidacion,
+    sincronizarItems
 };
