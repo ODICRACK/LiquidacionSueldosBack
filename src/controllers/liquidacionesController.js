@@ -52,7 +52,7 @@ const crearLiquidacion = async (req, res) => {
             `, [liquidacionId]);
         }
 
-        res.status(201).json({ message: 'Liquidación creada con éxito', id: liquidacionId });
+        res.status(201).json({ message: 'Liquidación creada con éxito', liquidacion_id: liquidacionId });
 
     } catch (error) {
         console.error('Error al crear liquidación:', error);
