@@ -2,131 +2,64 @@ const pool = require('../config/db');
 const { redondear } = require('../utils/mathEngine');
 const { validarMes, validarAnio } = require('../utils/validators');
 
-const crearLiquidacion = async (req, res) => {
-    const { empleado_id, anio, mes } = req.body;
+const createLiquidacion = async (req, res) => {
+    // Asegúrate de que estos campos coincidan con lo que mandas desde tu frontend
+    const { empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes } = req.body;
 
     try {
-        validarAnio(anio);
-        validarMes(mes);
-    } catch (error) {
-        return res.status(400).json({ error: error.message });
-    }
-
-    const client = await pool.connect();
-
-    try {
-        await client.query('BEGIN');
-
-        // 0. Un empleado dado de baja no puede iniciar nuevas liquidaciones
-        // AHORA TAMBIÉN TRAEMOS categoria_laboral Y banco
-        const empRes = await client.query('SELECT id, eliminado, sueldo_basico, categoria_laboral, banco FROM empleado WHERE id = $1', [empleado_id]);
-        if (empRes.rows.length === 0 || empRes.rows[0].eliminado) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'No se puede iniciar una liquidación para un empleado dado de baja.' });
-        }
-        const sueldoBasico = parseFloat(empRes.rows[0].sueldo_basico) || 0;
-        const catLaboral = empRes.rows[0].categoria_laboral || null;
-        const bancoEmp = empRes.rows[0].banco || null;
-
-        // 1. Validar la Regla 19: Solo una liquidación activa por empleado/período
-        const existe = await client.query(
-            'SELECT id FROM liquidacion WHERE empleado_id = $1 AND anio = $2 AND mes = $3 AND eliminado = FALSE',
-            [empleado_id, anio, mes]
+        // 1. Crear la liquidación base
+        const resultLiq = await pool.query(
+            `INSERT INTO liquidacion (empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+            [empleado_id, mes, anio, estado || 'BORRADOR', categoria_laboral, banco, fecha_pago_aportes]
         );
+        
+        const liquidacionId = resultLiq.rows[0].id;
 
-        if (existe.rows.length > 0) {
-            await client.query('ROLLBACK');
-            return res.status(409).json({
-                error: 'La liquidación ya existe para este período.',
-                liquidacion_id: existe.rows[0].id
-            });
-        }
-        // 1. Buscamos la última liquidación finalizada de este empleado
+        // 2. Auto-Creación Inteligente (Buscamos la última finalizada)
         const ultimaLiqRes = await pool.query(`
-    SELECT id FROM liquidacion 
-    WHERE empleado_id = $1 AND estado = 'FINALIZADA' AND eliminado = FALSE
-    ORDER BY anio DESC, mes DESC LIMIT 1
-`, [empleado_id]);
+            SELECT id FROM liquidacion 
+            WHERE empleado_id = $1 AND estado = 'FINALIZADA' AND eliminado = FALSE
+            ORDER BY anio DESC, mes DESC LIMIT 1
+        `, [empleado_id]);
 
         if (ultimaLiqRes.rows.length > 0) {
             const idAnterior = ultimaLiqRes.rows[0].id;
-            // CLONAMOS LOS ÍTEMS DE LA ÚLTIMA LIQUIDACIÓN
-            // Copiamos todo EXACTAMENTE IGUAL (activos, porcentajes, fórmulas)
-            // EXCEPTO valor_ingresado, que lo ponemos en NULL para que lo llenen este mes
+            
+            // Clonamos copiando también la unidad y base para que el PDF no se rompa
+            // NOTA: Ponemos valor_ingresado en NULL para que los manuales empiecen limpios
             await pool.query(`
-        INSERT INTO liquidacion_item (liquidacion_id, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, valor_ingresado, activo)
-        SELECT $1, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, NULL, activo
-        FROM liquidacion_item WHERE liquidacion_id = $2
-    `, [nuevaLiquidacionId, idAnterior]);
+                INSERT INTO liquidacion_item (
+                    liquidacion_id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
+                )
+                SELECT 
+                    $1, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible
+                FROM liquidacion_item 
+                WHERE liquidacion_id = $2
+            `, [liquidacionId, idAnterior]);
         } else {
-            // Si es su primera liquidación en la historia, hacemos el insert normal desde la tabla maestra "item"
+            // Si es su primera liquidación en el sistema, copiamos de la tabla maestra
             await pool.query(`
-        INSERT INTO liquidacion_item (liquidacion_id, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, valor_ingresado, activo)
-        SELECT $1, token, nombre, tipo, naturaleza, formula, base_token, porcentaje, NULL, TRUE
-        FROM item WHERE eliminado = FALSE
-    `, [nuevaLiquidacionId]);
-        }
-        // 2. Crear la Liquidación en estado BORRADOR (Fotografiando categoría y banco)
-        const liqRes = await client.query(
-            'INSERT INTO liquidacion (empleado_id, anio, mes, estado, categoria_laboral, banco) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
-            [empleado_id, anio, mes, 'BORRADOR', catLaboral, bancoEmp]
-        );
-        const liquidacion_id = liqRes.rows[0].id;
-
-        // 3. Generar el Snapshot de TODOS los Items globales (Regla 12)
-        const itemsGlobales = await client.query('SELECT * FROM item WHERE eliminado = FALSE');
-
-        for (const item of itemsGlobales.rows) {
-            await client.query(
-                `INSERT INTO liquidacion_item 
-                (liquidacion_id, item_id, activo, nombre, token, tipo, naturaleza, formula, porcentaje, base_token, valor_ingresado, unidad_imprimible, base_imprimible) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
-                [
-                    liquidacion_id,
-                    item.id,
-                    true,
-                    item.nombre,
-                    item.token,
-                    item.tipo,
-                    item.naturaleza,
-                    item.formula,
-                    item.porcentaje,
-                    item.base_token,
-                    item.token === 'SB' ? sueldoBasico : null,
-                    item.unidad_imprimible,
-                    item.base_imprimible
-                ]
-            );
+                INSERT INTO liquidacion_item (
+                    liquidacion_id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
+                )
+                SELECT 
+                    $1, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible
+                FROM item 
+                WHERE eliminado = FALSE
+            `, [liquidacionId]);
         }
 
-        // 4. Generar el Snapshot de Categorías para el Gráfico
-        const categoriasGlobales = await client.query('SELECT * FROM categoria WHERE eliminado = FALSE');
+        res.status(201).json({ message: 'Liquidación creada con éxito', id: liquidacionId });
 
-        for (const cat of categoriasGlobales.rows) {
-            await client.query(
-                'INSERT INTO liquidacion_categoria (liquidacion_id, categoria_id, nombre, total) VALUES ($1, $2, $3, $4)',
-                [liquidacion_id, cat.id, cat.nombre, 0.00]
-            );
-        }
-
-        await client.query('COMMIT');
-        res.json({ liquidacion_id, mensaje: 'Liquidación inicializada correctamente.' });
     } catch (error) {
-        await client.query('ROLLBACK');
-        if (error.code === '23505') {
-            const existente = await client.query(
-                'SELECT id FROM liquidacion WHERE empleado_id = $1 AND anio = $2 AND mes = $3 AND eliminado = FALSE',
-                [empleado_id, anio, mes]
-            );
-            return res.status(409).json({
-                error: 'La liquidación ya existe para este período.',
-                liquidacion_id: existente.rows[0]?.id
-            });
-        }
-        console.error(error);
-        res.status(500).json({ error: 'Error al inicializar la liquidación.' });
-    } finally {
-        client.release();
+        // Este console.error es vital: si vuelve a fallar, te dirá exactamente qué columna o dato no le gustó a la base de datos
+        console.error('Error al crear liquidación:', error);
+        res.status(500).json({ error: 'Error al crear la liquidación' });
     }
 };
 
