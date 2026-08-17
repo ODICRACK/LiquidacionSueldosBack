@@ -3,7 +3,6 @@ const { redondear } = require('../utils/mathEngine');
 const { validarMes, validarAnio } = require('../utils/validators');
 
 const crearLiquidacion = async (req, res) => {
-    // Asegúrate de que estos campos coincidan con lo que mandas desde tu frontend
     const { empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes } = req.body;
 
     try {
@@ -16,7 +15,7 @@ const crearLiquidacion = async (req, res) => {
         
         const liquidacionId = resultLiq.rows[0].id;
 
-        // 2. Auto-Creación Inteligente (Buscamos la última finalizada)
+        // 2. Auto-Creación Inteligente
         const ultimaLiqRes = await pool.query(`
             SELECT id FROM liquidacion 
             WHERE empleado_id = $1 AND estado = 'FINALIZADA' AND eliminado = FALSE
@@ -26,28 +25,27 @@ const crearLiquidacion = async (req, res) => {
         if (ultimaLiqRes.rows.length > 0) {
             const idAnterior = ultimaLiqRes.rows[0].id;
             
-            // Clonamos copiando también la unidad y base para que el PDF no se rompa
-            // NOTA: Ponemos valor_ingresado en NULL para que los manuales empiecen limpios
+            // AHORA INCLUIMOS item_id EN LA CLONACIÓN
             await pool.query(`
                 INSERT INTO liquidacion_item (
-                    liquidacion_id, token, nombre, tipo, naturaleza, formula, 
+                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
                     base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
                 )
                 SELECT 
-                    $1, token, nombre, tipo, naturaleza, formula, 
+                    $1, item_id, token, nombre, tipo, naturaleza, formula, 
                     base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible
                 FROM liquidacion_item 
                 WHERE liquidacion_id = $2
             `, [liquidacionId, idAnterior]);
         } else {
-            // Si es su primera liquidación en el sistema, copiamos de la tabla maestra
+            // AHORA INCLUIMOS id (COMO item_id) DESDE LA TABLA MAESTRA
             await pool.query(`
                 INSERT INTO liquidacion_item (
-                    liquidacion_id, token, nombre, tipo, naturaleza, formula, 
+                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
                     base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
                 )
                 SELECT 
-                    $1, token, nombre, tipo, naturaleza, formula, 
+                    $1, id, token, nombre, tipo, naturaleza, formula, 
                     base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible
                 FROM item 
                 WHERE eliminado = FALSE
@@ -57,7 +55,6 @@ const crearLiquidacion = async (req, res) => {
         res.status(201).json({ message: 'Liquidación creada con éxito', id: liquidacionId });
 
     } catch (error) {
-        // Este console.error es vital: si vuelve a fallar, te dirá exactamente qué columna o dato no le gustó a la base de datos
         console.error('Error al crear liquidación:', error);
         res.status(500).json({ error: 'Error al crear la liquidación' });
     }
