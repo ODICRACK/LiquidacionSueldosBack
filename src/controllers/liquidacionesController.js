@@ -2,7 +2,7 @@ const pool = require('../config/db');
 const { redondear } = require('../utils/mathEngine');
 const { validarMes, validarAnio } = require('../utils/validators');
 
-const createLiquidacion = async (req, res) => {
+const crearLiquidacion = async (req, res) => {
     // Asegúrate de que estos campos coincidan con lo que mandas desde tu frontend
     const { empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes } = req.body;
 
