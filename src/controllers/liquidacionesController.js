@@ -12,7 +12,7 @@ const crearLiquidacion = async (req, res) => {
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [empleado_id, mes, anio, estado || 'BORRADOR', categoria_laboral, banco, fecha_pago_aportes]
         );
-        
+
         const liquidacionId = resultLiq.rows[0].id;
 
         // 2. Auto-Creación Inteligente
@@ -24,32 +24,32 @@ const crearLiquidacion = async (req, res) => {
 
         if (ultimaLiqRes.rows.length > 0) {
             const idAnterior = ultimaLiqRes.rows[0].id;
-            
+
             // AHORA INCLUIMOS item_id EN LA CLONACIÓN
             await pool.query(`
-                INSERT INTO liquidacion_item (
-                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
-                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
-                )
-                SELECT 
-                    $1, item_id, token, nombre, tipo, naturaleza, formula, 
-                    base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible
-                FROM liquidacion_item 
-                WHERE liquidacion_id = $2
-            `, [liquidacionId, idAnterior]);
+            INSERT INTO liquidacion_item (
+                liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
+                base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
+            )
+            SELECT 
+                $1, item_id, token, nombre, tipo, naturaleza, formula, 
+                base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible, orden
+            FROM liquidacion_item 
+            WHERE liquidacion_id = $2
+        `, [liquidacionId, idAnterior]);
         } else {
             // AHORA INCLUIMOS id (COMO item_id) DESDE LA TABLA MAESTRA
             await pool.query(`
-                INSERT INTO liquidacion_item (
-                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
-                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible
-                )
-                SELECT 
-                    $1, id, token, nombre, tipo, naturaleza, formula, 
-                    base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible
-                FROM item 
-                WHERE eliminado = FALSE
-            `, [liquidacionId]);
+            INSERT INTO liquidacion_item (
+                liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
+                base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
+            )
+            SELECT 
+                $1, id, token, nombre, tipo, naturaleza, formula, 
+                base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible, orden
+            FROM item 
+            WHERE eliminado = FALSE
+        `, [liquidacionId]);
         }
 
         res.status(201).json({ message: 'Liquidación creada con éxito', liquidacion_id: liquidacionId });
@@ -65,14 +65,14 @@ const getLiquidacion = async (req, res) => {
 
     try {
         const liqRes = await pool.query(`
-            SELECT l.*, e.fecha_ingreso, e.sueldo_basico 
+            SELECT l.*, e.fecha_ingreso 
             FROM liquidacion l
             JOIN empleado e ON l.empleado_id = e.id
             WHERE l.id = $1 AND l.eliminado = FALSE
         `, [id]);
         if (liqRes.rows.length === 0) return res.status(404).json({ error: 'Liquidación no encontrada.' });
 
-        const itemsRes = await pool.query('SELECT * FROM liquidacion_item WHERE liquidacion_id = $1 ORDER BY id', [id]);
+        const itemsRes = await pool.query('SELECT * FROM liquidacion_item WHERE liquidacion_id = $1 ORDER BY orden ASC NULLS LAST, id ASC', [id]);
         const categoriasRes = await pool.query('SELECT * FROM liquidacion_categoria WHERE liquidacion_id = $1 ORDER BY id', [id]);
 
         res.json({

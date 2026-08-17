@@ -24,10 +24,10 @@ const getDatosRecibo = async (req, res) => {
         const recibo = liqRes.rows[0];
 
         const itemsRes = await pool.query(`
-            SELECT nombre, token, tipo, naturaleza, formula, porcentaje, valor_ingresado, unidad_imprimible, base_imprimible, resultado
+            SELECT nombre, token, tipo, naturaleza, formula, porcentaje, valor_ingresado, unidad_imprimible, base_imprimible, resultado, orden
             FROM liquidacion_item
             WHERE liquidacion_id = $1 AND activo = TRUE
-            ORDER BY id ASC
+            ORDER BY orden ASC NULLS LAST, id ASC
         `, [id]);
 
         const catRes = await pool.query(`
