@@ -6,13 +6,30 @@ const crearLiquidacion = async (req, res) => {
     const { empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes } = req.body;
 
     try {
+        // --- NUEVA VALIDACIÓN: PREVENCIÓN DE ERROR 500 ---
+        // Verificamos si ya existe una liquidación activa para este empleado en este mes y año
+        const existeRes = await pool.query(
+            `SELECT id FROM liquidacion 
+             WHERE empleado_id = $1 AND mes = $2 AND anio = $3 AND eliminado = FALSE`,
+            [empleado_id, mes, anio]
+        );
+
+        if (existeRes.rows.length > 0) {
+            // Si ya existe, NO lanzamos un error 500. Devolvemos un 409 pacífico con el ID existente.
+            return res.status(409).json({ 
+                error: 'La liquidación ya existe para este mes.', 
+                liquidacion_id: existeRes.rows[0].id 
+            });
+        }
+        // --------------------------------------------------
+
         // 1. Crear la liquidación base
         const resultLiq = await pool.query(
             `INSERT INTO liquidacion (empleado_id, mes, anio, estado, categoria_laboral, banco, fecha_pago_aportes) 
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [empleado_id, mes, anio, estado || 'BORRADOR', categoria_laboral, banco, fecha_pago_aportes]
         );
-
+        
         const liquidacionId = resultLiq.rows[0].id;
 
         // 2. Auto-Creación Inteligente
@@ -24,32 +41,30 @@ const crearLiquidacion = async (req, res) => {
 
         if (ultimaLiqRes.rows.length > 0) {
             const idAnterior = ultimaLiqRes.rows[0].id;
-
-            // AHORA INCLUIMOS item_id EN LA CLONACIÓN
+            
             await pool.query(`
-            INSERT INTO liquidacion_item (
-                liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
-                base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
-            )
-            SELECT 
-                $1, item_id, token, nombre, tipo, naturaleza, formula, 
-                base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible, orden
-            FROM liquidacion_item 
-            WHERE liquidacion_id = $2
-        `, [liquidacionId, idAnterior]);
+                INSERT INTO liquidacion_item (
+                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
+                )
+                SELECT 
+                    $1, item_id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, NULL, activo, unidad_imprimible, base_imprimible, orden
+                FROM liquidacion_item 
+                WHERE liquidacion_id = $2
+            `, [liquidacionId, idAnterior]);
         } else {
-            // AHORA INCLUIMOS id (COMO item_id) DESDE LA TABLA MAESTRA
             await pool.query(`
-            INSERT INTO liquidacion_item (
-                liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
-                base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
-            )
-            SELECT 
-                $1, id, token, nombre, tipo, naturaleza, formula, 
-                base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible, orden
-            FROM item 
-            WHERE eliminado = FALSE
-        `, [liquidacionId]);
+                INSERT INTO liquidacion_item (
+                    liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, valor_ingresado, activo, unidad_imprimible, base_imprimible, orden
+                )
+                SELECT 
+                    $1, id, token, nombre, tipo, naturaleza, formula, 
+                    base_token, porcentaje, NULL, TRUE, unidad_imprimible, base_imprimible, orden
+                FROM item 
+                WHERE eliminado = FALSE
+            `, [liquidacionId]);
         }
 
         res.status(201).json({ message: 'Liquidación creada con éxito', liquidacion_id: liquidacionId });
