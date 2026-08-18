@@ -65,7 +65,7 @@ const getLiquidacion = async (req, res) => {
 
     try {
         const liqRes = await pool.query(`
-            SELECT l.*, e.fecha_ingreso 
+            SELECT l.*, e.fecha_ingreso, e.sueldo_basico, e.cliente_id
             FROM liquidacion l
             JOIN empleado e ON l.empleado_id = e.id
             WHERE l.id = $1 AND l.eliminado = FALSE
