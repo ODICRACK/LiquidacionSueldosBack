@@ -133,8 +133,7 @@ const getDatosRecibo = async (req, res) => {
         const sueldoNeto = (totalHaberes + totalNoRemunerativos) - totalRetenciones;
 
         const periodoFormateado = `${mesesAbrev[recibo.mes - 1]}-${String(recibo.anio).slice(-2)}`;
-        const fechaActual = new Date();
-        const mesActualFormateado = `${String(fechaActual.getMonth() + 1).padStart(2, '0')}/${fechaActual.getFullYear()}`;
+        const mesActualFormateado = `${String(recibo.mes).padStart(2, '0')}/${recibo.anio}`;
 
         res.json({
             empresa: {

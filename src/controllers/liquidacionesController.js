@@ -102,7 +102,7 @@ const getLiquidacion = async (req, res) => {
 
 const actualizarBorrador = async (req, res) => {
     const { id } = req.params;
-    const { items, resultados } = req.body;
+    const { items, resultados, fecha_pago_aportes } = req.body;
     const client = await pool.connect();
 
     try {
@@ -113,6 +113,13 @@ const actualizarBorrador = async (req, res) => {
             throw new Error('No se puede modificar una liquidación finalizada.');
         }
         const empleadoId = liqRes.rows[0].empleado_id;
+
+        if (fecha_pago_aportes !== undefined) {
+            await client.query(
+                'UPDATE liquidacion SET fecha_pago_aportes = $1 WHERE id = $2',
+                [fecha_pago_aportes || null, id]
+            );
+        }
 
         for (const item of items) {
             const activo = item.token === 'SB' ? true : item.activo;
@@ -201,9 +208,9 @@ const finalizarLiquidacion = async (req, res) => {
             return res.status(400).json({ error: 'Hay items activos sin resultado calculado. Guarde el borrador antes de finalizar.' });
         }
 
-        // AHORA ESTAMPAMOS LA FECHA DE PAGO AL FINALIZAR
+        // AHORA ESTAMPAMOS LA FECHA DE PAGO AL FINALIZAR SI ESTA VACIA
         await pool.query(
-            "UPDATE liquidacion SET estado = 'FINALIZADA', fecha_pago_aportes = CURRENT_DATE WHERE id = $1 AND estado = 'BORRADOR'",
+            "UPDATE liquidacion SET estado = 'FINALIZADA', fecha_pago_aportes = COALESCE(fecha_pago_aportes, CURRENT_DATE) WHERE id = $1 AND estado = 'BORRADOR'",
             [id]
         );
 
