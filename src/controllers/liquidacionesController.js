@@ -271,7 +271,24 @@ const sincronizarItems = async (req, res) => {
         if (liqRes.rows.length === 0) throw new Error('Liquidación no encontrada.');
         if (liqRes.rows[0].estado !== 'BORRADOR') throw new Error('Solo se pueden sincronizar borradores.');
 
-        // 2. Inyectamos los ítems maestros que NO existan en esta liquidación
+        // 2. Actualizamos los ítems existentes con la configuración maestra actual
+        await client.query(`
+            UPDATE liquidacion_item li
+            SET 
+                nombre = i.nombre,
+                tipo = i.tipo,
+                naturaleza = i.naturaleza,
+                formula = i.formula,
+                base_token = i.base_token,
+                porcentaje = i.porcentaje,
+                unidad_imprimible = i.unidad_imprimible,
+                base_imprimible = i.base_imprimible,
+                orden = i.orden
+            FROM item i
+            WHERE li.liquidacion_id = $1 AND li.token = i.token AND i.eliminado = FALSE
+        `, [id]);
+
+        // 3. Inyectamos los ítems maestros que NO existan en esta liquidación
         await client.query(`
             INSERT INTO liquidacion_item (
                 liquidacion_id, item_id, token, nombre, tipo, naturaleza, formula, 
@@ -289,7 +306,7 @@ const sincronizarItems = async (req, res) => {
         `, [id]);
 
         await client.query('COMMIT');
-        res.json({ mensaje: 'Nuevos ítems sincronizados correctamente.' });
+        res.json({ mensaje: 'Ítems sincronizados y actualizados correctamente.' });
     } catch (error) {
         await client.query('ROLLBACK');
         res.status(400).json({ error: error.message });
