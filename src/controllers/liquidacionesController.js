@@ -145,7 +145,7 @@ const actualizarBorrador = async (req, res) => {
             if (!item.activo) continue;
 
             const relacionesRes = await client.query(
-                'SELECT categoria_id, operacion FROM item_categoria WHERE item_id = $1',
+                'SELECT categoria_id FROM item_categoria WHERE item_id = $1',
                 [item.item_id]
             );
 
@@ -153,20 +153,22 @@ const actualizarBorrador = async (req, res) => {
                 const catId = rel.categoria_id;
                 if (!categoriasTotales[catId]) categoriasTotales[catId] = 0;
 
-                const valor = resultados[item.id] || 0;
-                if (rel.operacion === 'SUMA') {
-                    categoriasTotales[catId] += valor;
-                } else if (rel.operacion === 'RESTA') {
-                    categoriasTotales[catId] -= valor;
-                }
+                const valor = Math.abs(resultados[item.id] || 0);
+                categoriasTotales[catId] += valor;
             }
         }
 
+        await client.query('DELETE FROM liquidacion_categoria WHERE liquidacion_id = $1', [id]);
+
         for (const [catId, total] of Object.entries(categoriasTotales)) {
-            await client.query(
-                'UPDATE liquidacion_categoria SET total = $1 WHERE liquidacion_id = $2 AND categoria_id = $3',
-                [redondear(total), id, catId]
-            );
+            const catRes = await client.query('SELECT nombre FROM categoria WHERE id = $1', [catId]);
+            if (catRes.rows.length > 0) {
+                const nombre = catRes.rows[0].nombre;
+                await client.query(
+                    'INSERT INTO liquidacion_categoria (liquidacion_id, categoria_id, nombre, total) VALUES ($1, $2, $3, $4)',
+                    [id, catId, nombre, redondear(total)]
+                );
+            }
         }
 
         await client.query('COMMIT');
