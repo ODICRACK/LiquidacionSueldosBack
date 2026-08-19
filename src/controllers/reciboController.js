@@ -31,9 +31,17 @@ const getDatosRecibo = async (req, res) => {
         `, [id]);
 
         const catRes = await pool.query(`
-            SELECT nombre, total
-            FROM liquidacion_categoria
-            WHERE liquidacion_id = $1
+            SELECT 
+                c.nombre,
+                SUM(CASE WHEN li.naturaleza IN ('INFORMATIVO', 'RESTA') THEN ABS(COALESCE(li.resultado, li.valor_ingresado, 0)) ELSE 0 END) as total,
+                SUM(CASE WHEN li.naturaleza = 'INFORMATIVO' THEN ABS(COALESCE(li.resultado, li.valor_ingresado, 0)) ELSE 0 END) as empleador,
+                SUM(CASE WHEN li.naturaleza = 'RESTA' THEN ABS(COALESCE(li.resultado, li.valor_ingresado, 0)) ELSE 0 END) as empleado
+            FROM liquidacion_item li
+            JOIN item_categoria ic ON li.item_id = ic.item_id
+            JOIN categoria c ON ic.categoria_id = c.id
+            WHERE li.liquidacion_id = $1 AND li.activo = TRUE
+            GROUP BY c.id, c.nombre
+            HAVING SUM(CASE WHEN li.naturaleza IN ('INFORMATIVO', 'RESTA') THEN ABS(COALESCE(li.resultado, li.valor_ingresado, 0)) ELSE 0 END) > 0
         `, [id]);
 
         // --- 1. CALCULAR ANTIGÜEDAD PARA EL CONTEXTO ---
